@@ -93,10 +93,6 @@ export function ChatPage() {
               disabled={!state.hasSelectedProject || state.runtime?.status === "waiting_for_user"}
               canCancel={state.canCancel}
               chatId={state.activeChatId}
-              planMode={state.planMode}
-              onTogglePlanMode={state.hasSelectedProject ? () => {
-                void state.handleTogglePlanMode()
-              } : undefined}
             />
           </div>
         </div>

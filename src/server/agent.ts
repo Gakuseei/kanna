@@ -195,13 +195,18 @@ export class AgentCoordinator {
       throw new Error("Project not found")
     }
 
+    const resolvedModel = command.model || DEFAULT_MODEL
+    const resolvedEffort = (command.effort as "low" | "medium" | "high" | "max") || undefined
+    console.log(`[agent] query model=${resolvedModel} effort=${resolvedEffort} (command.model=${command.model})`)
+
     const q = query({
       prompt: command.content,
       options: {
         cwd: project.localPath,
-        model: DEFAULT_MODEL,
+        model: resolvedModel,
+        effort: resolvedEffort,
         resume: chat.resumeSessionId ?? undefined,
-        permissionMode: chat.planMode ? "plan" : "acceptEdits",
+        permissionMode: command.planMode ? "plan" : "acceptEdits",
         canUseTool,
         tools: [...TOOLSET],
         settingSources: ["user", "project", "local"],
@@ -350,7 +355,6 @@ export class AgentCoordinator {
     }
 
     if (result.confirmed) {
-      await this.store.setPlanMode(command.chatId, false)
       if (result.clearContext) {
         await this.store.setResumeSession(command.chatId, null)
         await this.store.appendMessage(

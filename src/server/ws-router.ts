@@ -142,11 +142,6 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           break
         }
-        case "chat.setPlanMode": {
-          await store.setPlanMode(command.chatId, command.planMode)
-          send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
-          break
-        }
         case "chat.respondTool": {
           await agent.respondTool(command)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })

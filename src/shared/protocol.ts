@@ -13,9 +13,8 @@ export type ClientCommand =
   | { type: "chat.create"; projectId: string }
   | { type: "chat.rename"; chatId: string; title: string }
   | { type: "chat.delete"; chatId: string }
-  | { type: "chat.send"; chatId?: string; projectId?: string; content: string }
+  | { type: "chat.send"; chatId?: string; projectId?: string; content: string; model?: string; effort?: string; planMode?: boolean }
   | { type: "chat.cancel"; chatId: string }
-  | { type: "chat.setPlanMode"; chatId: string; planMode: boolean }
   | { type: "chat.respondTool"; chatId: string; toolUseId: string; result: unknown }
 
 export type ClientEnvelope =

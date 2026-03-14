@@ -92,9 +92,11 @@ export function KannaTranscript({
     }
 
     switch (processed.kind) {
-      case "system": {
-        const isFirst = messages.findIndex((entry) => entry.processed?.kind === "system") === index
-        return isFirst ? <SystemMessage key={message.id} message={processed} rawJson={message.rawJson} /> : null
+      case "system": {        
+        // const isFirst = messages.findIndex((entry) => entry.processed?.kind === "system") === index
+        // return isFirst ? <SystemMessage key={message.id} message={processed} rawJson={message.rawJson} /> : null
+        return <SystemMessage key={message.id} message={processed} rawJson={message.rawJson} /> 
+
       }
       case "account_info": {
         const isFirst = messages.findIndex((entry) => entry.processed?.kind === "account_info") === index

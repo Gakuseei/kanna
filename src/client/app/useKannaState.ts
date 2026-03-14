@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
+import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import type { ChatSnapshot, LocalProjectsSnapshot, SidebarChatRow, SidebarData } from "../../shared/types"
 import type { AskUserQuestionItem } from "../components/messages/types"
 import { useAppDialog } from "../components/ui/app-dialog"
@@ -46,7 +47,6 @@ export interface KannaState {
   messages: ReturnType<typeof processTranscriptMessages>
   latestToolIds: ReturnType<typeof getLatestToolIds>
   runtime: ChatSnapshot["runtime"] | null
-  planMode: boolean
   isProcessing: boolean
   canCancel: boolean
   transcriptPaddingBottom: number
@@ -62,11 +62,10 @@ export interface KannaState {
   handleCreateChat: (projectId: string) => Promise<void>
   handleOpenLocalProject: (localPath: string) => Promise<void>
   handleCreateProject: (project: { mode: "new" | "existing"; localPath: string; title: string }) => Promise<void>
-  handleSend: (content: string) => Promise<void>
+  handleSend: (content: string, options?: { model?: string; effort?: string; planMode?: boolean }) => Promise<void>
   handleCancel: () => Promise<void>
   handleDeleteChat: (chat: SidebarChatRow) => Promise<void>
   handleRemoveProject: (projectId: string) => Promise<void>
-  handleTogglePlanMode: () => Promise<void>
   handleOpenExternal: (action: "open_finder" | "open_terminal" | "open_editor") => Promise<void>
   handleCompose: () => void
   handleAskUserQuestion: (
@@ -101,7 +100,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingLocalPath, setStartingLocalPath] = useState<string | null>(null)
-  const [draftPlanMode, setDraftPlanMode] = useState(false)
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -167,7 +165,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   useEffect(() => {
     if (!chatSnapshot) return
     setSelectedProjectId(chatSnapshot.runtime.projectId)
-    setDraftPlanMode(chatSnapshot.runtime.planMode)
     if (pendingChatId === chatSnapshot.runtime.chatId) {
       setPendingChatId(null)
     }
@@ -188,7 +185,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const messages = useMemo(() => processTranscriptMessages(chatSnapshot?.messages ?? []), [chatSnapshot?.messages])
   const latestToolIds = useMemo(() => getLatestToolIds(messages), [messages])
   const runtime = chatSnapshot?.runtime ?? null
-  const effectivePlanMode = runtime?.planMode ?? draftPlanMode
   const isProcessing = isProcessingStatus(runtime?.status)
   const canCancel = canCancelStatus(runtime?.status)
   const transcriptPaddingBottom = inputHeight + 48
@@ -230,13 +226,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   async function handleCreateChat(projectId: string) {
     try {
       const result = await socket.command<{ chatId: string }>({ type: "chat.create", projectId })
-      if (draftPlanMode) {
-        await socket.command({
-          type: "chat.setPlanMode",
-          chatId: result.chatId,
-          planMode: true,
-        })
-      }
       setSelectedProjectId(projectId)
       setPendingChatId(result.chatId)
       navigate(`/chat/${result.chatId}`)
@@ -252,13 +241,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
       const result = await socket.command<{ projectId: string }>({ type: "project.open", localPath })
       setSelectedProjectId(result.projectId)
       const chat = await socket.command<{ chatId: string }>({ type: "chat.create", projectId: result.projectId })
-      if (draftPlanMode) {
-        await socket.command({
-          type: "chat.setPlanMode",
-          chatId: chat.chatId,
-          planMode: true,
-        })
-      }
       setPendingChatId(chat.chatId)
       navigate(`/chat/${chat.chatId}`)
       setSidebarOpen(false)
@@ -280,13 +262,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
       )
       setSelectedProjectId(result.projectId)
       const chat = await socket.command<{ chatId: string }>({ type: "chat.create", projectId: result.projectId })
-      if (draftPlanMode) {
-        await socket.command({
-          type: "chat.setPlanMode",
-          chatId: chat.chatId,
-          planMode: true,
-        })
-      }
       setPendingChatId(chat.chatId)
       navigate(`/chat/${chat.chatId}`)
       setSidebarOpen(false)
@@ -298,7 +273,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
   }
 
-  async function handleSend(content: string) {
+  async function handleSend(content: string, options?: { model?: string; effort?: string; planMode?: boolean }) {
     try {
       let projectId = selectedProjectId ?? sidebarData.projectGroups[0]?.groupKey ?? null
       if (!activeChatId && !projectId && fallbackLocalProjectPath) {
@@ -314,27 +289,15 @@ export function useKannaState(activeChatId: string | null): KannaState {
         throw new Error("Open a project first")
       }
 
-      let result: { chatId?: string }
-      if (!activeChatId && effectivePlanMode && projectId) {
-        const created = await socket.command<{ chatId: string }>({ type: "chat.create", projectId })
-        await socket.command({
-          type: "chat.setPlanMode",
-          chatId: created.chatId,
-          planMode: true,
-        })
-        result = await socket.command<{ chatId?: string }>({
-          type: "chat.send",
-          chatId: created.chatId,
-          content,
-        })
-      } else {
-        result = await socket.command<{ chatId?: string }>({
-          type: "chat.send",
-          chatId: activeChatId ?? undefined,
-          projectId: activeChatId ? undefined : projectId ?? undefined,
-          content,
-        })
-      }
+      const result = await socket.command<{ chatId?: string }>({
+        type: "chat.send",
+        chatId: activeChatId ?? undefined,
+        projectId: activeChatId ? undefined : projectId ?? undefined,
+        content,
+        model: options?.model,
+        effort: options?.effort,
+        planMode: options?.planMode,
+      })
 
       if (!activeChatId && result.chatId) {
         setPendingChatId(result.chatId)
@@ -370,22 +333,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
         navigate("/")
       }
     } catch (error) {
-      setCommandError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  async function handleTogglePlanMode() {
-    const nextPlanMode = !effectivePlanMode
-    setDraftPlanMode(nextPlanMode)
-    if (!activeChatId) return
-    try {
-      await socket.command({
-        type: "chat.setPlanMode",
-        chatId: activeChatId,
-        planMode: nextPlanMode,
-      })
-    } catch (error) {
-      setDraftPlanMode(runtime?.planMode ?? false)
       setCommandError(error instanceof Error ? error.message : String(error))
     }
   }
@@ -463,6 +410,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
   async function handleExitPlanMode(toolUseId: string, confirmed: boolean, clearContext?: boolean, message?: string) {
     if (!activeChatId) return
+    if (confirmed) {
+      useChatPreferencesStore.getState().setPlanMode(false)
+    }
     try {
       await socket.command({
         type: "chat.respondTool",
@@ -495,8 +445,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     inputRef,
     messages,
     latestToolIds,
-    runtime: runtime ? { ...runtime, planMode: effectivePlanMode } : null,
-    planMode: effectivePlanMode,
+    runtime,
     isProcessing,
     canCancel,
     transcriptPaddingBottom,
@@ -516,7 +465,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
     handleCancel,
     handleDeleteChat,
     handleRemoveProject,
-    handleTogglePlanMode,
     handleOpenExternal,
     handleCompose,
     handleAskUserQuestion,

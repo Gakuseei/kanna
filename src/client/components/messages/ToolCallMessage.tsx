@@ -159,7 +159,7 @@ export function ToolCallMessage({ message, isLoading = false, outputsUrl, localP
                     {message.input.new_string as string}
                   </MetaCodeBlock>
                 </div>
-              ) : !isReadTool && (
+              ) : !isReadTool && !isWriteTool && (
                 <MetaCodeBlock label={
                   isBashTool ? (
                     <span className="flex items-center gap-2 w-full">
@@ -198,7 +198,12 @@ export function ToolCallMessage({ message, isLoading = false, outputsUrl, localP
                   content={typeof message.result === "string" ? message.result : JSON.stringify(message.result, null, 2)}
                 />
               )}
-              {hasResult && !isDbQueryTool && !isReadContextTool && !isReadTool && !(isEditTool && !message.isError) && (
+              {isWriteTool && !message.isError && (
+                <FileContentView
+                  content={message.input.content as string}
+                />
+              )}
+              {hasResult && !isDbQueryTool && !isReadContextTool && !isReadTool && !(isWriteTool && !message.isError) && !(isEditTool && !message.isError) && (
                 <MetaCodeBlock label={message.isError ? "Error" : "Result"} copyText={typeof message.result === "string" ? message.result : JSON.stringify(message.result, null, 2)}>
                   {typeof message.result === "string" ? message.result : JSON.stringify(message.result, null, 2)}
                 </MetaCodeBlock>
