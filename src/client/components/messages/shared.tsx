@@ -207,22 +207,22 @@ function withChildClassName(node: MarkdownChildNode, className: string): Markdow
 // Markdown component overrides
 export const markdownComponents = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <h1 className="text-[18px] font-normal leading-tight mt-6 mb-4 first:mt-0">{children}</h1>
+    <h1 className="text-[18px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h1>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <h2 className="text-[18px] font-normal leading-tight mt-5 mb-3 first:mt-0">{children}</h2>
+    <h2 className="text-[18px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h2>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <h3 className="text-[16px] font-normal leading-tight mt-4 mb-2 first:mt-0">{children}</h3>
+    <h3 className="text-[16px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h3>
   ),
   h4: ({ children }: { children?: ReactNode }) => (
-    <h4 className="text-[16px] font-normal leading-tight mt-3 mb-2 first:mt-0">{children}</h4>
+    <h4 className="text-[16px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h4>
   ),
   h5: ({ children }: { children?: ReactNode }) => (
-    <h5 className="text-[16px] font-normal leading-tight mt-3 mb-1 first:mt-0">{children}</h5>
+    <h5 className="text-[16px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h5>
   ),
   h6: ({ children }: { children?: ReactNode }) => (
-    <h6 className="text-[16px] font-normal leading-tight mt-3 mb-1 first:mt-0">{children}</h6>
+    <h6 className="text-[16px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h6>
   ),
 
   pre: ({ children, ...props }: ComponentPropsWithoutRef<"pre">) => {
@@ -284,7 +284,7 @@ export const markdownComponents = {
   ),
 
   p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
-    <p className="break-words" {...props}>{children}</p>
+    <p className="break-words mt-5 mb-3 first:mt-0 last:mb-0" {...props}>{children}</p>
   ),
 
   blockquote: ({ children, ...props }: ComponentPropsWithoutRef<"blockquote">) => (
@@ -304,7 +304,7 @@ export const markdownComponents = {
 
       return (
         <blockquote
-          className="my-1 border-l-2 border-border/80 pl-2 text-muted-foreground"
+          className="my-2 border-l-2 border-border/80 pl-2 text-muted-foreground"
           {...props}
         >
           {childNodes}

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   ALLOW_FOCUS_RETAIN_ATTRIBUTE,
+  CHAT_INPUT_ATTRIBUTE,
   FOCUS_FALLBACK_IGNORE_ATTRIBUTE,
+  focusNextChatInput,
   hasActiveFocusOverlay,
   isTextEntryTarget,
   shouldRestoreChatInputFocus,
@@ -77,6 +79,45 @@ function createTree() {
 }
 
 describe("chatFocusPolicy", () => {
+  test("focusNextChatInput keeps focus on the current input when it is the only chat input", () => {
+    let focusedElement: unknown = null
+    const current = {
+      disabled: false,
+      focus: () => {
+        focusedElement = current
+      },
+    } as HTMLTextAreaElement
+    const document = {
+      querySelectorAll: () => [current],
+    } as unknown as Document
+
+    expect(focusNextChatInput(current, document)).toBe(true)
+    expect(focusedElement).toBe(current)
+  })
+
+  test("focusNextChatInput cycles to the next chat input", () => {
+    let focusedElement: unknown = null
+    const first = {
+      disabled: false,
+      focus: () => {
+        focusedElement = first
+      },
+    } as HTMLTextAreaElement
+    const second = {
+      disabled: false,
+      focus: () => {
+        focusedElement = second
+      },
+    } as HTMLTextAreaElement
+    const document = {
+      querySelectorAll: (selector: string) =>
+        selector === `textarea[${CHAT_INPUT_ATTRIBUTE}]` ? [first, second] : [],
+    } as unknown as Document
+
+    expect(focusNextChatInput(first, document)).toBe(true)
+    expect(focusedElement).toBe(second)
+  })
+
   test("detects text entry targets and explicit retain targets", () => {
     const { otherInput, custom, random } = createTree()
 

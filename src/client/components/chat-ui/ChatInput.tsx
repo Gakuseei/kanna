@@ -16,6 +16,7 @@ import { cn } from "../../lib/utils"
 import { useIsStandalone } from "../../hooks/useIsStandalone"
 import { useChatInputStore } from "../../stores/chatInputStore"
 import { useChatPreferencesStore } from "../../stores/chatPreferencesStore"
+import { CHAT_INPUT_ATTRIBUTE, focusNextChatInput } from "../../app/chatFocusPolicy"
 
 function PopoverMenuItem({
   onClick,
@@ -252,6 +253,12 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }
 
   function handleKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Tab" && !event.shiftKey) {
+      event.preventDefault()
+      focusNextChatInput(textareaRef.current, document)
+      return
+    }
+
     if (event.key === "Tab" && event.shiftKey && showPlanMode) {
       event.preventDefault()
       setPlanMode(!planMode)
@@ -282,6 +289,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
           placeholder="Build something..."
           value={value}
           autoFocus
+          {...{ [CHAT_INPUT_ATTRIBUTE]: "" }}
           rows={1}
           onChange={(event) => {
             setValue(event.target.value)
