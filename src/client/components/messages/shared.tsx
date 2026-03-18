@@ -207,7 +207,7 @@ function withChildClassName(node: MarkdownChildNode, className: string): Markdow
 // Markdown component overrides
 export const markdownComponents = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <h1 className="text-[18px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h1>
+    <h1 className="text-[20px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h1>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
     <h2 className="text-[18px] font-normal leading-tight mt-5 mb-3 first:mt-0 last:mb-0">{children}</h2>
@@ -304,7 +304,7 @@ export const markdownComponents = {
 
       return (
         <blockquote
-          className="my-2 border-l-2 border-border/80 pl-2 text-muted-foreground"
+          className="my-2 mt-5 mb-3 first:mt-0 last:mb-0 border-l-2 border-border/80 pl-2 text-muted-foreground"
           {...props}
         >
           {childNodes}

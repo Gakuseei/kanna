@@ -12,7 +12,7 @@ describe("markdownComponents", () => {
       </Markdown>
     )
 
-    expect(html).toContain('<h1 class="text-[18px] font-normal')
+    expect(html).toContain('<h1 class="text-[20px] font-normal')
     expect(html).toContain('<h2 class="text-[18px] font-normal')
     expect(html).toContain('<h3 class="text-[16px] font-normal')
     expect(html).toContain('<h4 class="text-[16px] font-normal')
