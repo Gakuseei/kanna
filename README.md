@@ -1,6 +1,6 @@
 <p align="center">
   <img src="assets/icon.png" alt="Kanna" width="80" />
-</p>
+</p> 
 
 <h1 align="center">Kanna</h1>
 
