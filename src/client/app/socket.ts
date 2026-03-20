@@ -1,4 +1,12 @@
-import type { ClientCommand, ClientEnvelope, ServerEnvelope, SubscriptionTopic, TerminalEvent, TerminalSnapshot } from "../../shared/protocol"
+import type {
+  ClientCommand,
+  ClientEnvelope,
+  FileTreeEvent,
+  ServerEnvelope,
+  SubscriptionTopic,
+  TerminalEvent,
+  TerminalSnapshot,
+} from "../../shared/protocol"
 import { LOG_PREFIX } from "../../shared/branding"
 
 type SnapshotListener<T> = (value: T) => void
@@ -89,14 +97,36 @@ export class KannaSocket {
     }
   }
 
-  subscribe<T>(topic: SubscriptionTopic, listener: SnapshotListener<T>) {
+  subscribe<TSnapshot, TEvent = never>(
+    topic: SubscriptionTopic,
+    listener: SnapshotListener<TSnapshot>,
+    eventListener?: EventListener<TEvent>
+  ) {
     const id = crypto.randomUUID()
-    this.subscriptions.set(id, { topic, listener: listener as SnapshotListener<unknown> })
+    this.subscriptions.set(id, {
+      topic,
+      listener: listener as SnapshotListener<unknown>,
+      eventListener: eventListener as EventListener<unknown> | undefined,
+    })
     this.enqueue({ v: 1, type: "subscribe", id, topic })
     return () => {
       this.subscriptions.delete(id)
       this.enqueue({ v: 1, type: "unsubscribe", id })
     }
+  }
+
+  subscribeFileTree(
+    projectId: string,
+    handlers: {
+      onSnapshot: SnapshotListener<{ projectId: string; rootPath: string; pageSize: number; supportsRealtime: true }>
+      onEvent?: EventListener<FileTreeEvent>
+    }
+  ) {
+    return this.subscribe(
+      { type: "file-tree", projectId },
+      handlers.onSnapshot,
+      handlers.onEvent
+    )
   }
 
   subscribeTerminal(

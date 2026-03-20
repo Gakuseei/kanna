@@ -88,6 +88,7 @@ export interface KannaState {
   handleDeleteChat: (chat: SidebarChatRow) => Promise<void>
   handleRemoveProject: (projectId: string) => Promise<void>
   handleOpenExternal: (action: "open_finder" | "open_terminal" | "open_editor") => Promise<void>
+  handleOpenExternalPath: (action: "open_finder" | "open_editor", localPath: string) => Promise<void>
   handleOpenLocalLink: (target: { path: string; line?: number; column?: number }) => Promise<void>
   handleCompose: () => void
   handleAskUserQuestion: (
@@ -417,6 +418,17 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
   }
 
+  async function handleOpenExternalPath(action: "open_finder" | "open_editor", localPath: string) {
+    try {
+      await openExternal({
+        action,
+        localPath,
+      })
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   async function openExternal(command: {
     action: "open_finder" | "open_terminal" | "open_editor"
     localPath: string
@@ -532,6 +544,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     handleDeleteChat,
     handleRemoveProject,
     handleOpenExternal,
+    handleOpenExternalPath,
     handleOpenLocalLink,
     handleCompose,
     handleAskUserQuestion,

@@ -444,7 +444,14 @@ export function ChatPage() {
                 "--terminal-toggle-duration": `${TERMINAL_TOGGLE_ANIMATION_DURATION_MS}ms`,
               } as CSSProperties}
             >
-              <RightSidebar />
+              <RightSidebar
+                projectId={projectId}
+                isVisible={showRightSidebar}
+                socket={state.socket}
+                onOpenFile={state.handleOpenLocalLink}
+                onOpenInFinder={(path) => state.handleOpenExternalPath("open_finder", path)}
+                onClose={() => toggleRightSidebar(projectId)}
+              />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

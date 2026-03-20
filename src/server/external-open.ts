@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises"
+import path from "node:path"
 import process from "node:process"
 import type { ClientCommand, EditorOpenSettings, EditorPreset } from "../shared/protocol"
 import { resolveLocalPath } from "./paths"
@@ -19,9 +20,11 @@ const DEFAULT_EDITOR_SETTINGS: EditorOpenSettings = {
 export async function openExternal(command: OpenExternalCommand) {
   const resolvedPath = resolveLocalPath(command.localPath)
   const platform = process.platform
+  const info = command.action === "open_editor" || command.action === "open_finder"
+    ? await stat(resolvedPath).catch(() => null)
+    : null
 
   if (command.action === "open_editor") {
-    const info = await stat(resolvedPath).catch(() => null)
     if (!info) {
       throw new Error(`Path not found: ${resolvedPath}`)
     }
@@ -39,7 +42,11 @@ export async function openExternal(command: OpenExternalCommand) {
 
   if (platform === "darwin") {
     if (command.action === "open_finder") {
-      spawnDetached("open", [resolvedPath])
+      if (info?.isDirectory()) {
+        spawnDetached("open", [resolvedPath])
+      } else {
+        spawnDetached("open", ["-R", resolvedPath])
+      }
       return
     }
     if (command.action === "open_terminal") {
@@ -50,7 +57,11 @@ export async function openExternal(command: OpenExternalCommand) {
 
   if (platform === "win32") {
     if (command.action === "open_finder") {
-      spawnDetached("explorer", [resolvedPath])
+      if (info?.isDirectory()) {
+        spawnDetached("explorer", [resolvedPath])
+      } else {
+        spawnDetached("explorer", ["/select,", resolvedPath])
+      }
       return
     }
     if (command.action === "open_terminal") {
@@ -64,7 +75,7 @@ export async function openExternal(command: OpenExternalCommand) {
   }
 
   if (command.action === "open_finder") {
-    spawnDetached("xdg-open", [resolvedPath])
+    spawnDetached("xdg-open", [info?.isDirectory() ? resolvedPath : path.dirname(resolvedPath)])
     return
   }
   if (command.action === "open_terminal") {

@@ -3,6 +3,7 @@ import { APP_NAME } from "../shared/branding"
 import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
 import { discoverProjects, type DiscoveredProject } from "./discovery"
+import { FileTreeManager } from "./file-tree-manager"
 import { getMachineDisplayName } from "./machine-name"
 import { TerminalManager } from "./terminal-manager"
 import { createWsRouter, type ClientState } from "./ws-router"
@@ -30,6 +31,9 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   let server: ReturnType<typeof Bun.serve<ClientState>>
   let router: ReturnType<typeof createWsRouter>
   const terminals = new TerminalManager()
+  const fileTree = new FileTreeManager({
+    getProject: (projectId) => store.getProject(projectId),
+  })
   const agent = new AgentCoordinator({
     store,
     onStateChange: () => {
@@ -40,6 +44,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     store,
     agent,
     terminals,
+    fileTree,
     refreshDiscovery,
     getDiscoveredProjects: () => discoveredProjects,
     machineDisplayName,
@@ -101,6 +106,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
       await agent.cancel(chatId)
     }
     router.dispose()
+    fileTree.dispose()
     terminals.closeAll()
     await store.compact()
     server.stop(true)

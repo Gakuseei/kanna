@@ -25,8 +25,8 @@ function clampSize(size: number) {
 
 function createDefaultProjectLayout(): ProjectRightSidebarLayout {
   return {
-    isVisible: false,
-    size: DEFAULT_RIGHT_SIDEBAR_SIZE,
+    isVisible: true,
+    size: RIGHT_SIDEBAR_MIN_SIZE_PERCENT,
   }
 }
 
@@ -72,8 +72,8 @@ export const useRightSidebarStore = create<RightSidebarState>()(
 )
 
 export const DEFAULT_PROJECT_RIGHT_SIDEBAR_LAYOUT: ProjectRightSidebarLayout = {
-  isVisible: false,
-  size: DEFAULT_RIGHT_SIDEBAR_SIZE,
+  isVisible: true,
+  size: RIGHT_SIDEBAR_MIN_SIZE_PERCENT,
 }
 
 export function getDefaultProjectRightSidebarLayout() {
