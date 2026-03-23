@@ -24,7 +24,7 @@ function createDeps(overrides: Partial<Parameters<typeof runCli>[1]> = {}) {
       }
     }>,
     fetchLatestVersion: [] as string[],
-    installLatest: [] as string[],
+    installVersion: [] as Array<{ packageName: string; version: string }>,
     openUrl: [] as string[],
     log: [] as string[],
     warn: [] as string[],
@@ -44,8 +44,8 @@ function createDeps(overrides: Partial<Parameters<typeof runCli>[1]> = {}) {
       calls.fetchLatestVersion.push(packageName)
       return "0.3.0"
     },
-    installLatest: (packageName) => {
-      calls.installLatest.push(packageName)
+    installVersion: (packageName, version) => {
+      calls.installVersion.push({ packageName, version })
       return true
     },
     openUrl: (url) => {
@@ -119,7 +119,7 @@ describe("runCli", () => {
 
     expect(result.kind).toBe("started")
     expect(calls.fetchLatestVersion).toEqual(["kanna-code"])
-    expect(calls.installLatest).toEqual([])
+    expect(calls.installVersion).toEqual([])
     expect(calls.startServer).toHaveLength(1)
     expect(calls.startServer[0]).toMatchObject({
       port: 4000,
@@ -175,7 +175,7 @@ describe("runCli", () => {
     const result = await runCli(["--port", "4000", "--no-open"], deps)
 
     expect(result).toEqual({ kind: "restarting" })
-    expect(calls.installLatest).toEqual(["kanna-code"])
+    expect(calls.installVersion).toEqual([{ packageName: "kanna-code", version: "0.4.0" }])
     expect(calls.startServer).toEqual([])
   })
 
@@ -185,8 +185,8 @@ describe("runCli", () => {
         calls.fetchLatestVersion.push(packageName)
         return "0.4.0"
       },
-      installLatest: (packageName) => {
-        calls.installLatest.push(packageName)
+      installVersion: (packageName, version) => {
+        calls.installVersion.push({ packageName, version })
         return false
       },
     })
@@ -194,7 +194,7 @@ describe("runCli", () => {
     const result = await runCli(["--no-open"], deps)
 
     expect(result.kind).toBe("started")
-    expect(calls.installLatest).toEqual(["kanna-code"])
+    expect(calls.installVersion).toEqual([{ packageName: "kanna-code", version: "0.4.0" }])
     expect(calls.warn).toContain("[kanna] update failed, continuing current version")
   })
 
@@ -209,7 +209,7 @@ describe("runCli", () => {
     const result = await runCli(["--no-open"], deps)
 
     expect(result.kind).toBe("started")
-    expect(calls.installLatest).toEqual([])
+    expect(calls.installVersion).toEqual([])
     expect(calls.warn).toContain("[kanna] update check failed, continuing current version")
   })
 })

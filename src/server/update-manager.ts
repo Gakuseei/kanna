@@ -7,7 +7,7 @@ const UPDATE_CACHE_TTL_MS = 5 * 60 * 1000
 export interface UpdateManagerDeps {
   currentVersion: string
   fetchLatestVersion: (packageName: string) => Promise<string>
-  installLatest: (packageName: string) => boolean
+  installVersion: (packageName: string, version: string) => boolean
   devMode?: boolean
 }
 
@@ -169,7 +169,20 @@ export class UpdateManager {
       error: null,
     })
 
-    const installed = this.deps.installLatest(PACKAGE_NAME)
+    const targetVersion = this.snapshot.latestVersion
+    if (!targetVersion) {
+      this.setSnapshot({
+        ...this.snapshot,
+        status: "error",
+        error: "Unable to determine which version to install.",
+      })
+      return {
+        ok: false,
+        action: "restart",
+      }
+    }
+
+    const installed = this.deps.installVersion(PACKAGE_NAME, targetVersion)
     if (!installed) {
       this.setSnapshot({
         ...this.snapshot,

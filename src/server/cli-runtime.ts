@@ -13,7 +13,7 @@ export interface CliOptions {
 export interface CliUpdateOptions {
   version: string
   fetchLatestVersion: (packageName: string) => Promise<string>
-  installLatest: (packageName: string) => boolean
+  installVersion: (packageName: string, version: string) => boolean
   argv: string[]
   command: string
 }
@@ -39,7 +39,7 @@ export interface CliRuntimeDeps {
   bunVersion: string
   startServer: (options: CliOptions & { update: CliUpdateOptions }) => Promise<{ port: number; stop: () => Promise<void> }>
   fetchLatestVersion: (packageName: string) => Promise<string>
-  installLatest: (packageName: string) => boolean
+  installVersion: (packageName: string, version: string) => boolean
   openUrl: (url: string) => void
   log: (message: string) => void
   warn: (message: string) => void
@@ -155,8 +155,8 @@ async function maybeSelfUpdate(_argv: string[], deps: CliRuntimeDeps) {
     return null
   }
 
-  deps.log(`${LOG_PREFIX} updating to ${latestVersion}`)
-  if (!deps.installLatest(PACKAGE_NAME)) {
+  deps.log(`${LOG_PREFIX} installing ${PACKAGE_NAME}@${latestVersion}`)
+  if (!deps.installVersion(PACKAGE_NAME, latestVersion)) {
     deps.warn(`${LOG_PREFIX} update failed, continuing current version`)
     return null
   }
@@ -191,7 +191,7 @@ export async function runCli(argv: string[], deps: CliRuntimeDeps): Promise<CliR
     update: {
       version: deps.version,
       fetchLatestVersion: deps.fetchLatestVersion,
-      installLatest: deps.installLatest,
+      installVersion: deps.installVersion,
       argv,
       command: CLI_COMMAND,
     },
@@ -238,14 +238,8 @@ export async function fetchLatestPackageVersion(packageName: string) {
   return payload.version
 }
 
-export function installLatestPackage(packageName: string) {
+export function installPackageVersion(packageName: string, version: string) {
   if (!hasCommand("bun")) return false
-  const result = spawnSync("bun", ["install", "-g", `${packageName}@latest`], { stdio: "inherit" })
+  const result = spawnSync("bun", ["install", "-g", `${packageName}@${version}`], { stdio: "inherit" })
   return result.status === 0
-}
-
-export function relaunchCli(command: string, args: string[]) {
-  const result = spawnSync(command, args, { stdio: "inherit" })
-  if (result.error) return null
-  return result.status ?? 0
 }

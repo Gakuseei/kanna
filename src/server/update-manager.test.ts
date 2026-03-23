@@ -6,7 +6,7 @@ describe("UpdateManager", () => {
     const manager = new UpdateManager({
       currentVersion: "0.12.0",
       fetchLatestVersion: async () => "0.13.0",
-      installLatest: () => true,
+      installVersion: () => true,
     })
 
     const snapshot = await manager.checkForUpdates({ force: true })
@@ -25,7 +25,7 @@ describe("UpdateManager", () => {
         calls += 1
         return calls === 1 ? "0.12.1" : "0.13.0"
       },
-      installLatest: () => true,
+      installVersion: () => true,
     })
 
     await manager.checkForUpdates()
@@ -36,15 +36,20 @@ describe("UpdateManager", () => {
   })
 
   test("surfaces install failures without clearing the running version", async () => {
+    let installedVersion: string | null = null
     const manager = new UpdateManager({
       currentVersion: "0.12.0",
       fetchLatestVersion: async () => "0.13.0",
-      installLatest: () => false,
+      installVersion: (_packageName, version) => {
+        installedVersion = version
+        return false
+      },
     })
 
     const result = await manager.installUpdate()
 
     expect(result).toEqual({ ok: false, action: "restart" })
+    expect(installedVersion === "0.13.0").toBe(true)
     expect(manager.getSnapshot().status).toBe("error")
     expect(manager.getSnapshot().currentVersion).toBe("0.12.0")
   })
@@ -53,7 +58,7 @@ describe("UpdateManager", () => {
     const manager = new UpdateManager({
       currentVersion: "0.12.0",
       fetchLatestVersion: async () => "9.9.9",
-      installLatest: () => true,
+      installVersion: () => true,
       devMode: true,
     })
 

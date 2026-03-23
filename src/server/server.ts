@@ -15,7 +15,7 @@ export interface StartKannaServerOptions {
   update?: {
     version: string
     fetchLatestVersion: (packageName: string) => Promise<string>
-    installLatest: (packageName: string) => boolean
+    installVersion: (packageName: string, version: string) => boolean
   }
 }
 
@@ -41,11 +41,11 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   await keybindings.initialize()
   const updateManager = options.update
     ? new UpdateManager({
-        currentVersion: options.update.version,
-        fetchLatestVersion: options.update.fetchLatestVersion,
-        installLatest: options.update.installLatest,
-        devMode: getRuntimeProfile() === "dev",
-      })
+      currentVersion: options.update.version,
+      fetchLatestVersion: options.update.fetchLatestVersion,
+      installVersion: options.update.installVersion,
+      devMode: getRuntimeProfile() === "dev",
+    })
     : null
   const agent = new AgentCoordinator({
     store,
