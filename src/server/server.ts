@@ -4,6 +4,7 @@ import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
 import { discoverProjects, type DiscoveredProject } from "./discovery"
 import { KeybindingsManager } from "./keybindings"
+import { MediaStore } from "./media-store"
 import { getMachineDisplayName } from "./machine-name"
 import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
@@ -24,8 +25,10 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   const port = options.port ?? 3210
   const strictPort = options.strictPort ?? false
   const store = new EventStore()
+  const mediaStore = new MediaStore(store.dataDir)
   const machineDisplayName = getMachineDisplayName()
   await store.initialize()
+  await mediaStore.initialize()
   let discoveredProjects: DiscoveredProject[] = []
 
   async function refreshDiscovery() {
@@ -50,6 +53,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     : null
   const agent = new AgentCoordinator({
     store,
+    mediaStore,
     onStateChange: () => {
       router.broadcastSnapshots()
     },
@@ -74,7 +78,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     try {
       server = Bun.serve<ClientState>({
         port: actualPort,
-        fetch(req, serverInstance) {
+        async fetch(req, serverInstance) {
           const url = new URL(req.url)
 
           if (url.pathname === "/ws") {
@@ -88,6 +92,43 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
 
           if (url.pathname === "/health") {
             return Response.json({ ok: true, port: actualPort })
+          }
+
+          if (url.pathname === "/api/media/images/stage") {
+            if (req.method !== "POST") {
+              return new Response("Method not allowed", { status: 405 })
+            }
+
+            try {
+              const formData = await req.formData()
+              const files: File[] = []
+              for (const value of formData.values()) {
+                if (typeof value !== "string") {
+                  files.push(value)
+                }
+              }
+              if (files.length === 0) {
+                return Response.json({ images: [] })
+              }
+
+              const images = await mediaStore.stageImages(files)
+              return Response.json({ images })
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error)
+              return Response.json({ error: message }, { status: 400 })
+            }
+          }
+
+          if (url.pathname.startsWith("/media/chat/")) {
+            const parts = url.pathname.split("/").filter(Boolean)
+            if (parts.length !== 4 || parts[0] !== "media" || parts[1] !== "chat") {
+              return new Response("Not found", { status: 404 })
+            }
+
+            return mediaStore.serveChatAsset(
+              decodeURIComponent(parts[2]),
+              decodeURIComponent(parts[3]),
+            )
           }
 
           return serveStatic(distDir, url.pathname)

@@ -138,5 +138,13 @@ export function createEmptyState(): StoreState {
 }
 
 export function cloneTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
-  return entries.map((entry) => ({ ...entry }))
+  return entries.map((entry) => {
+    if (entry.kind === "user_prompt" && entry.attachments) {
+      return {
+        ...entry,
+        attachments: entry.attachments.map((attachment) => ({ ...attachment })),
+      }
+    }
+    return { ...entry }
+  })
 }

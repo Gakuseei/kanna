@@ -67,6 +67,7 @@ export type ClientCommand =
       projectId?: string
       provider?: AgentProvider
       content: string
+      attachments?: Array<{ stagedId: string }>
       model?: string
       modelOptions?: ModelOptions
       effort?: string

@@ -1,6 +1,7 @@
 import { query, type CanUseTool, type PermissionResult, type Query } from "@anthropic-ai/claude-agent-sdk"
 import type {
   AgentProvider,
+  ImageAttachment,
   NormalizedToolCall,
   PendingToolSnapshot,
   KannaStatus,
@@ -12,6 +13,7 @@ import { EventStore } from "./event-store"
 import { CodexAppServerManager } from "./codex-app-server"
 import { generateTitleForChat } from "./generate-title"
 import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
+import { MediaStore } from "./media-store"
 import {
   codexServiceTierFromModelOptions,
   getServerProviderCatalog,
@@ -63,6 +65,7 @@ interface ActiveTurn {
 
 interface AgentCoordinatorArgs {
   store: EventStore
+  mediaStore?: MediaStore
   onStateChange: () => void
   codexManager?: CodexAppServerManager
   generateTitle?: (messageContent: string, cwd: string) => Promise<string | null>
@@ -101,6 +104,20 @@ function discardedToolResult(
   return {
     discarded: true,
   }
+}
+
+function titleSeedFromPrompt(content: string, attachments: ImageAttachment[]) {
+  const trimmed = content.trim()
+  if (trimmed) {
+    return trimmed
+  }
+  if (attachments.length === 1) {
+    return attachments[0]?.fileName ?? "Image"
+  }
+  if (attachments.length > 1) {
+    return `${attachments.length} images`
+  }
+  return ""
 }
 
 export function normalizeClaudeStreamMessage(message: any): TranscriptEntry[] {
@@ -331,6 +348,7 @@ async function startClaudeTurn(args: {
 
 export class AgentCoordinator {
   private readonly store: EventStore
+  private readonly mediaStore: MediaStore | null
   private readonly onStateChange: () => void
   private readonly codexManager: CodexAppServerManager
   private readonly generateTitle: (messageContent: string, cwd: string) => Promise<string | null>
@@ -338,6 +356,7 @@ export class AgentCoordinator {
 
   constructor(args: AgentCoordinatorArgs) {
     this.store = args.store
+    this.mediaStore = args.mediaStore ?? null
     this.onStateChange = args.onStateChange
     this.codexManager = args.codexManager ?? new CodexAppServerManager()
     this.generateTitle = args.generateTitle ?? generateTitleForChat
@@ -387,6 +406,7 @@ export class AgentCoordinator {
     chatId: string
     provider: AgentProvider
     content: string
+    attachments: ImageAttachment[]
     model: string
     effort?: string
     serviceTier?: "fast"
@@ -404,10 +424,15 @@ export class AgentCoordinator {
     await this.store.setPlanMode(args.chatId, args.planMode)
 
     const existingMessages = this.store.getMessages(args.chatId)
-    const shouldGenerateTitle = args.appendUserPrompt && chat.title === "New Chat" && existingMessages.length === 0
+    const titleSeed = titleSeedFromPrompt(args.content, args.attachments)
+    const shouldGenerateTitle = args.appendUserPrompt && chat.title === "New Chat" && existingMessages.length === 0 && Boolean(titleSeed)
 
     if (args.appendUserPrompt) {
-      await this.store.appendMessage(args.chatId, timestamped({ kind: "user_prompt", content: args.content }, Date.now()))
+      await this.store.appendMessage(args.chatId, timestamped({
+        kind: "user_prompt",
+        content: args.content,
+        attachments: args.attachments.length > 0 ? args.attachments : undefined,
+      }, Date.now()))
     }
     await this.store.recordTurnStarted(args.chatId)
 
@@ -417,7 +442,7 @@ export class AgentCoordinator {
     }
 
     if (shouldGenerateTitle) {
-      void this.generateTitleInBackground(args.chatId, args.content, project.localPath)
+      void this.generateTitleInBackground(args.chatId, titleSeed, project.localPath)
     }
 
     const onToolRequest = async (request: HarnessToolRequest): Promise<unknown> => {
@@ -460,6 +485,7 @@ export class AgentCoordinator {
       turn = await this.codexManager.startTurn({
         chatId: args.chatId,
         content: args.content,
+        attachments: args.attachments,
         model: args.model,
         effort: args.effort as any,
         serviceTier: args.serviceTier,
@@ -512,11 +538,20 @@ export class AgentCoordinator {
 
     const chat = this.store.requireChat(chatId)
     const provider = this.resolveProvider(command, chat.provider)
+    const stagedIds = command.attachments?.map((attachment) => attachment.stagedId).filter(Boolean) ?? []
+    if (provider === "claude" && stagedIds.length > 0) {
+      throw new Error("Image attachments are currently supported only for Codex chats.")
+    }
+
+    const attachments = stagedIds.length > 0
+      ? await this.requireMediaStore().finalizeStagedImages(chatId, stagedIds)
+      : []
     const settings = this.getProviderSettings(provider, command)
     await this.startTurnForChat({
       chatId,
       provider,
       content: command.content,
+      attachments,
       model: settings.model,
       effort: settings.effort,
       serviceTier: settings.serviceTier,
@@ -598,6 +633,7 @@ export class AgentCoordinator {
             chatId: active.chatId,
             provider: active.provider,
             content: active.postToolFollowUp.content,
+            attachments: [],
             model: active.model,
             effort: active.effort,
             serviceTier: active.serviceTier,
@@ -716,5 +752,12 @@ export class AgentCoordinator {
     pending.resolve(command.result)
 
     this.onStateChange()
+  }
+
+  private requireMediaStore() {
+    if (!this.mediaStore) {
+      throw new Error("Media storage is not configured")
+    }
+    return this.mediaStore
   }
 }

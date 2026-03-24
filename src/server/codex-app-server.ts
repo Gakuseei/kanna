@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import { homedir } from "node:os"
+import path from "node:path"
 import { createInterface } from "node:readline"
 import type { Readable, Writable } from "node:stream"
-import type { AskUserQuestionItem, CodexReasoningEffort, ServiceTier, TodoItem, TranscriptEntry } from "../shared/types"
+import { getDataDir } from "../shared/branding"
+import type { AskUserQuestionItem, CodexReasoningEffort, ImageAttachment, ServiceTier, TodoItem, TranscriptEntry } from "../shared/types"
 import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
 import {
   type CollabAgentToolCallItem,
   type ContextCompactedNotification,
+  type CodexUserInput,
   type CodexRequestId,
   type CommandExecutionApprovalDecision,
   type CommandExecutionRequestApprovalParams,
@@ -118,6 +122,7 @@ export interface StartCodexTurnArgs {
   effort?: CodexReasoningEffort
   serviceTier?: ServiceTier
   content: string
+  attachments?: ImageAttachment[]
   planMode: boolean
   onToolRequest: (request: HarnessToolRequest) => Promise<unknown>
   onApprovalRequest?: PendingTurn["onApprovalRequest"]
@@ -258,6 +263,23 @@ function dynamicContentToText(contentItems: DynamicToolCallOutputContentItem[] |
     .map((item) => item.type === "inputText" ? item.text ?? "" : item.imageUrl ?? "")
     .filter(Boolean)
     .join("\n")
+}
+
+function codexTurnInputs(content: string, attachments: ImageAttachment[] = []): CodexUserInput[] {
+  const inputs: CodexUserInput[] = attachments.map((attachment) => ({
+    type: "localImage",
+    path: path.join(getDataDir(homedir()), "media", attachment.assetPath),
+  }))
+
+  if (content.trim()) {
+    inputs.push({
+      type: "text",
+      text: content,
+      text_elements: [],
+    })
+  }
+
+  return inputs
 }
 
 function dynamicToolPayload(value: Record<string, unknown> | unknown[] | string | number | boolean | null | undefined): Record<string, unknown> {
@@ -754,13 +776,7 @@ export class CodexAppServerManager {
     try {
       const response = await this.sendRequest<TurnStartResponse>(context, "turn/start", {
         threadId: context.sessionToken ?? "",
-        input: [
-          {
-            type: "text",
-            text: args.content,
-            text_elements: [],
-          },
-        ],
+        input: codexTurnInputs(args.content, args.attachments),
         approvalPolicy: "never",
         model: args.model,
         effort: args.effort,

@@ -234,6 +234,27 @@ export interface AccountInfo {
   apiKeySource?: string
 }
 
+export interface ImageAttachment {
+  id: string
+  chatId: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  width?: number
+  height?: number
+  assetPath: string
+  url: string
+}
+
+export interface StagedImageUpload {
+  stagedId: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  width?: number
+  height?: number
+}
+
 export interface AskUserQuestionOption {
   label: string
   description?: string
@@ -340,6 +361,7 @@ export interface ToolResultEntry extends TranscriptEntryBase {
 export interface UserPromptEntry extends TranscriptEntryBase {
   kind: "user_prompt"
   content: string
+  attachments?: ImageAttachment[]
 }
 
 export interface SystemInitEntry extends TranscriptEntryBase {
@@ -502,7 +524,7 @@ export type HydratedToolCall =
   | HydratedUnknownToolCall
 
 export type HydratedTranscriptMessage =
-  | ({ kind: "user_prompt"; content: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })
+  | ({ kind: "user_prompt"; content: string; attachments?: ImageAttachment[]; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "system_init"; model: string; tools: string[]; agents: string[]; slashCommands: string[]; mcpServers: McpServerInfo[]; provider: AgentProvider; id: string; messageId?: string; timestamp: string; hidden?: boolean; debugRaw?: string })
   | ({ kind: "account_info"; accountInfo: AccountInfo; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "assistant_text"; text: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })

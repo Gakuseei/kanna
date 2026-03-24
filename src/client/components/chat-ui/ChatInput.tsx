@@ -1,5 +1,16 @@
-import { forwardRef, memo, useCallback, useEffect, useRef, useState } from "react"
-import { ArrowUp } from "lucide-react"
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+} from "react"
+import { ArrowUp, Paperclip, X } from "lucide-react"
 import {
   type AgentProvider,
   type ClaudeReasoningEffort,
@@ -7,6 +18,13 @@ import {
   type ModelOptions,
   type ProviderCatalogEntry,
 } from "../../../shared/types"
+import {
+  createPendingComposerImages,
+  extractImageFiles,
+  revokePendingComposerImages,
+  stageImages,
+  type PendingComposerImage,
+} from "../../lib/imageUploads"
 import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
 import { cn } from "../../lib/utils"
@@ -16,11 +34,16 @@ import { type ComposerState, useChatPreferencesStore } from "../../stores/chatPr
 import { CHAT_INPUT_ATTRIBUTE, focusNextChatInput } from "../../app/chatFocusPolicy"
 import { ChatPreferenceControls } from "./ChatPreferenceControls"
 
+interface SubmitOptions {
+  provider?: AgentProvider
+  model?: string
+  modelOptions?: ModelOptions
+  planMode?: boolean
+  attachments?: Array<{ stagedId: string }>
+}
+
 interface Props {
-  onSubmit: (
-    value: string,
-    options?: { provider?: AgentProvider; model?: string; modelOptions?: ModelOptions; planMode?: boolean }
-  ) => Promise<void>
+  onSubmit: (value: string, options?: SubmitOptions) => Promise<void>
   onCancel?: () => void
   disabled: boolean
   canCancel?: boolean
@@ -124,7 +147,13 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     resetComposerFromProvider,
   } = useChatPreferencesStore()
   const [value, setValue] = useState(() => (chatId ? getDraft(chatId) : ""))
+  const [pendingImages, setPendingImages] = useState<PendingComposerImage[]>([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [isDraggingImages, setIsDraggingImages] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingImagesRef = useRef<PendingComposerImage[]>([])
   const isStandalone = useIsStandalone()
   const [lockedComposerState, setLockedComposerState] = useState<ComposerState | null>(() => (
     activeProvider ? createLockedComposerState(activeProvider, composerState, providerDefaults) : null
@@ -137,6 +166,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   const selectedProvider = providerLocked ? activeProvider : composerState.provider
   const providerConfig = availableProviders.find((provider) => provider.id === selectedProvider) ?? availableProviders[0]
   const showPlanMode = providerConfig?.supportsPlanMode ?? false
+  const hasDraftContent = value.trim().length > 0 || pendingImages.length > 0
 
   const autoResize = useCallback(() => {
     const element = textareaRef.current
@@ -156,6 +186,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
 
     forwardedRef.current = node
   }, [forwardedRef])
+
+  useEffect(() => {
+    pendingImagesRef.current = pendingImages
+  }, [pendingImages])
 
   useEffect(() => {
     autoResize()
@@ -192,6 +226,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       lockedComposerProvider: lockedComposerState?.provider ?? null,
     })
   }, [activeProvider, chatId, composerState.model, composerState.provider, lockedComposerState?.provider, providerLocked, providerPrefs.model, providerPrefs.provider, selectedProvider])
+
+  useEffect(() => () => {
+    revokePendingComposerImages(pendingImagesRef.current)
+  }, [])
 
   function setReasoningEffort(reasoningEffort: string) {
     if (providerLocked) {
@@ -242,8 +280,48 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     setEffectivePlanMode(!providerPrefs.planMode)
   }
 
+  function clearPendingImages() {
+    revokePendingComposerImages(pendingImagesRef.current)
+    pendingImagesRef.current = []
+    setPendingImages([])
+  }
+
+  function removePendingImage(id: string) {
+    setPendingImages((current) => {
+      const removed = current.filter((image) => image.id === id)
+      revokePendingComposerImages(removed)
+      const next = current.filter((image) => image.id !== id)
+      pendingImagesRef.current = next
+      return next
+    })
+  }
+
+  async function addPendingFiles(files: File[]) {
+    if (files.length === 0) {
+      return
+    }
+
+    try {
+      const nextImages = await createPendingComposerImages(files)
+      setPendingImages((current) => {
+        const next = [...current, ...nextImages]
+        pendingImagesRef.current = next
+        return next
+      })
+      setSubmitError(null)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   async function handleSubmit() {
-    if (!value.trim()) return
+    if (!hasDraftContent || isSubmitting) return
+
+    if (selectedProvider === "claude" && pendingImages.length > 0) {
+      setSubmitError("Images are currently supported only for Codex chats.")
+      return
+    }
+
     const nextValue = value
     let modelOptions: ModelOptions
     if (providerPrefs.provider === "claude") {
@@ -251,33 +329,58 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     } else {
       modelOptions = { codex: { ...providerPrefs.modelOptions } }
     }
-    const submitOptions = {
+
+    const submitOptions: SubmitOptions = {
       provider: selectedProvider,
       model: providerPrefs.model,
       modelOptions,
       planMode: showPlanMode ? providerPrefs.planMode : false,
     }
+
     logChatInput("submit settings", {
       chatId: chatId ?? null,
       activeProvider,
       composerProvider: providerPrefs.provider,
       submitOptions,
+      pendingImages: pendingImages.length,
     })
 
-    setValue("")
-    if (chatId) clearDraft(chatId)
-    if (textareaRef.current) textareaRef.current.style.height = "auto"
+    setIsSubmitting(true)
+    setSubmitError(null)
 
     try {
+      if (pendingImages.length > 0) {
+        const staged = await stageImages(pendingImages.map((image) => image.file))
+        submitOptions.attachments = staged.map((image) => ({ stagedId: image.stagedId }))
+      }
+
       await onSubmit(nextValue, submitOptions)
+      setValue("")
+      if (chatId) clearDraft(chatId)
+      if (textareaRef.current) textareaRef.current.style.height = "auto"
+      clearPendingImages()
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       console.error("[ChatInput] Submit failed:", error)
-      setValue(nextValue)
-      if (chatId) setDraft(chatId, nextValue)
+      setSubmitError(message)
+      if (chatId) {
+        setDraft(chatId, nextValue)
+      }
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  function handleKeyDown(event: React.KeyboardEvent) {
+  function handleTextChange(event: ChangeEvent<HTMLTextAreaElement>) {
+    setValue(event.target.value)
+    if (chatId) setDraft(chatId, event.target.value)
+    autoResize()
+    if (submitError) {
+      setSubmitError(null)
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
       focusNextChatInput(textareaRef.current, document)
@@ -302,46 +405,172 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       void handleSubmit()
     }
   }
+
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = extractImageFiles(event.clipboardData.files)
+    if (files.length === 0) {
+      return
+    }
+
+    event.preventDefault()
+    void addPendingFiles(files)
+  }
+
+  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = event.target.files ? extractImageFiles(event.target.files) : []
+    void addPendingFiles(files)
+    event.target.value = ""
+  }
+
+  function handleComposerDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (extractImageFiles(event.dataTransfer.files).length === 0) {
+      return
+    }
+
+    event.preventDefault()
+    setIsDraggingImages(true)
+  }
+
+  function handleComposerDragOver(event: DragEvent<HTMLDivElement>) {
+    if (extractImageFiles(event.dataTransfer.files).length === 0) {
+      return
+    }
+
+    event.preventDefault()
+    if (!isDraggingImages) {
+      setIsDraggingImages(true)
+    }
+  }
+
+  function handleComposerDragLeave(event: DragEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return
+    }
+    setIsDraggingImages(false)
+  }
+
+  function handleComposerDrop(event: DragEvent<HTMLDivElement>) {
+    const files = extractImageFiles(event.dataTransfer.files)
+    if (files.length === 0) {
+      setIsDraggingImages(false)
+      return
+    }
+
+    event.preventDefault()
+    setIsDraggingImages(false)
+    void addPendingFiles(files)
+  }
+
   return (
     <div className={cn("p-3 pt-0 md:pb-2", isStandalone && "px-5 pb-5")}>
-      <div className="flex items-end gap-2 max-w-[840px] mx-auto border dark:bg-card/40 backdrop-blur-lg border-border rounded-[29px] pr-1.5">
-        <Textarea
-          ref={setTextareaRefs}
-          placeholder="Build something..."
-          value={value}
-          autoFocus
-          {...{ [CHAT_INPUT_ATTRIBUTE]: "" }}
-          rows={1}
-          onChange={(event) => {
-            setValue(event.target.value)
-            if (chatId) setDraft(chatId, event.target.value)
-            autoResize()
-          }}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          className="flex-1 text-base p-3 md:p-4 pl-4.5 md:pl-6 resize-none max-h-[200px] outline-none bg-transparent border-0 shadow-none"
-        />
-        <Button
-          type="button"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            if (canCancel) {
-              onCancel?.()
-            } else if (!disabled && value.trim()) {
-              void handleSubmit()
-            }
-          }}
-          disabled={!canCancel && (disabled || !value.trim())}
-          size="icon"
-          className="flex-shrink-0 bg-slate-600 text-white dark:bg-white dark:text-slate-900 rounded-full cursor-pointer h-10 w-10 md:h-11 md:w-11 mb-1 -mr-0.5 md:mr-0 md:mb-1.5 touch-manipulation disabled:bg-white/60 disabled:text-slate-700"
-        >
-          {canCancel ? (
-            <div className="w-3 h-3 md:w-4 md:h-4 rounded-xs bg-current" />
-          ) : (
-            <ArrowUp className="h-5 w-5 md:h-6 md:w-6" />
-          )}
-        </Button>
+      <div
+        className={cn(
+          "relative max-w-[840px] mx-auto overflow-hidden border border-border rounded-[29px] dark:bg-card/40 backdrop-blur-lg transition-colors",
+          isDraggingImages && "border-primary/70 bg-primary/6"
+        )}
+        onDragEnter={handleComposerDragEnter}
+        onDragOver={handleComposerDragOver}
+        onDragLeave={handleComposerDragLeave}
+        onDrop={handleComposerDrop}
+      >
+        {pendingImages.length > 0 ? (
+          <div className="border-b border-border/70 px-3 md:px-4 pt-3 pb-2.5">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {pendingImages.map((image) => (
+                <div
+                  key={image.id}
+                  className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-border bg-muted/40"
+                >
+                  <img
+                    src={image.previewUrl}
+                    alt={image.file.name}
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${image.file.name}`}
+                    onClick={() => removePendingImage(image.id)}
+                    className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex items-end gap-2 pr-1.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Attach images"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || isSubmitting || canCancel}
+            className="mb-1 ml-1.5 h-10 w-10 shrink-0 rounded-full text-muted-foreground md:mb-1.5 md:h-11 md:w-11"
+          >
+            <Paperclip className="h-4.5 w-4.5" />
+          </Button>
+
+          <Textarea
+            ref={setTextareaRefs}
+            placeholder="Build something..."
+            value={value}
+            autoFocus
+            {...{ [CHAT_INPUT_ATTRIBUTE]: "" }}
+            rows={1}
+            onChange={handleTextChange}
+            onPaste={handlePaste}
+            onKeyDown={handleKeyDown}
+            disabled={disabled || isSubmitting}
+            className="flex-1 text-base p-3 md:p-4 resize-none max-h-[200px] outline-none bg-transparent border-0 shadow-none"
+          />
+
+          <Button
+            type="button"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              if (canCancel) {
+                onCancel?.()
+              } else if (!disabled && hasDraftContent) {
+                void handleSubmit()
+              }
+            }}
+            disabled={!canCancel && (disabled || isSubmitting || !hasDraftContent)}
+            size="icon"
+            className="flex-shrink-0 bg-slate-600 text-white dark:bg-white dark:text-slate-900 rounded-full cursor-pointer h-10 w-10 md:h-11 md:w-11 mb-1 -mr-0.5 md:mr-0 md:mb-1.5 touch-manipulation disabled:bg-white/60 disabled:text-slate-700"
+          >
+            {canCancel ? (
+              <div className="w-3 h-3 md:w-4 md:h-4 rounded-xs bg-current" />
+            ) : (
+              <ArrowUp className="h-5 w-5 md:h-6 md:w-6" />
+            )}
+          </Button>
+        </div>
+
+        {isDraggingImages ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[29px] border-2 border-dashed border-primary/60 bg-background/70 text-sm font-medium text-foreground">
+            Drop images to attach
+          </div>
+        ) : null}
       </div>
+
+      {submitError ? (
+        <p className="max-w-[840px] mx-auto mt-2 px-1 text-sm text-destructive">
+          {submitError}
+        </p>
+      ) : null}
 
       <ChatPreferenceControls
         availableProviders={availableProviders}
