@@ -145,6 +145,26 @@ export function resolvePlanModeState(args: {
   }
 }
 
+export function getChatInputKeyboardAction(args: {
+  key: string
+  code?: string
+  shiftKey: boolean
+  showPlanMode: boolean
+}) {
+  const isTabKey = args.key === "Tab" || args.code === "Tab"
+  const isReverseTabKey = args.key === "ISO_Left_Tab" || (args.shiftKey && isTabKey)
+
+  if (!args.shiftKey && isTabKey) {
+    return "focus_next" as const
+  }
+
+  if (args.showPlanMode && isReverseTabKey) {
+    return "toggle_plan_mode" as const
+  }
+
+  return null
+}
+
 const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput({
   onSubmit,
   onCancel,
@@ -572,13 +592,20 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       scheduleNativeClipboardFallback()
     }
 
-    if (event.key === "Tab" && !event.shiftKey) {
+    const keyboardAction = getChatInputKeyboardAction({
+      key: event.key,
+      code: event.code,
+      shiftKey: event.shiftKey,
+      showPlanMode,
+    })
+
+    if (keyboardAction === "focus_next") {
       event.preventDefault()
       focusNextChatInput(textareaRef.current, document)
       return
     }
 
-    if (event.key === "Tab" && event.shiftKey && showPlanMode) {
+    if (keyboardAction === "toggle_plan_mode") {
       event.preventDefault()
       toggleEffectivePlanMode()
       return

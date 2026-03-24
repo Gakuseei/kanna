@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { resolvePlanModeState } from "./ChatInput"
+import { getChatInputKeyboardAction, resolvePlanModeState } from "./ChatInput"
 import { useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 
 const INITIAL_STATE = useChatPreferencesStore.getInitialState()
@@ -83,5 +83,43 @@ describe("resolvePlanModeState", () => {
       modelOptions: { reasoningEffort: "high" },
       planMode: false,
     })
+  })
+})
+
+describe("getChatInputKeyboardAction", () => {
+  test("treats Tab as focus-next when shift is not pressed", () => {
+    expect(getChatInputKeyboardAction({
+      key: "Tab",
+      code: "Tab",
+      shiftKey: false,
+      showPlanMode: true,
+    })).toBe("focus_next")
+  })
+
+  test("toggles plan mode for Shift+Tab", () => {
+    expect(getChatInputKeyboardAction({
+      key: "Tab",
+      code: "Tab",
+      shiftKey: true,
+      showPlanMode: true,
+    })).toBe("toggle_plan_mode")
+  })
+
+  test("toggles plan mode for ISO_Left_Tab on Linux-style keyboards", () => {
+    expect(getChatInputKeyboardAction({
+      key: "ISO_Left_Tab",
+      code: "Tab",
+      shiftKey: true,
+      showPlanMode: true,
+    })).toBe("toggle_plan_mode")
+  })
+
+  test("ignores reverse tab when plan mode is unavailable", () => {
+    expect(getChatInputKeyboardAction({
+      key: "ISO_Left_Tab",
+      code: "Tab",
+      shiftKey: true,
+      showPlanMode: false,
+    })).toBeNull()
   })
 })
