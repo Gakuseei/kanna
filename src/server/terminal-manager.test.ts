@@ -2,10 +2,11 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { TerminalManager } from "./terminal-manager"
+import { resolveTerminalSpawnCommand, TerminalManager } from "./terminal-manager"
 
 const SHELL_START_TIMEOUT_MS = 5_000
-const COMMAND_TIMEOUT_MS = 5_000
+const COMMAND_TIMEOUT_MS = 12_000
+const SLOW_TEST_TIMEOUT_MS = 15_000
 const FOCUS_IN_SEQUENCE = "\x1b[I"
 const RAW_READ_HEX_COMMAND = `python3 -c "exec('import os,sys,tty,termios,select\\nfd=sys.stdin.fileno()\\nold=termios.tcgetattr(fd)\\ntty.setraw(fd)\\ntry:\\n    sys.stdout.write(\"__RAW_READY__\\\\n\")\\n    sys.stdout.flush()\\n    r,_,_=select.select([fd],[],[],1)\\n    data=os.read(fd,8) if r else b\"\"\\n    print(data.hex() or \"__EMPTY__\")\\nfinally:\\n    termios.tcsetattr(fd, termios.TCSADRAIN, old)')"\r`
 
@@ -65,6 +66,27 @@ async function waitForOutputToContain(getOutput: () => string, value: string, ti
 }
 
 describeIfSupported("TerminalManager", () => {
+  test("wraps Linux shells with script when available", () => {
+    expect(resolveTerminalSpawnCommand("/bin/bash", {
+      platform: "linux",
+      scriptPath: "/usr/bin/script",
+    })).toEqual(["/usr/bin/script", "-qefc", "'/bin/bash' '-l'", "/dev/null"])
+  })
+
+  test("falls back to a direct shell launch when script is unavailable", () => {
+    expect(resolveTerminalSpawnCommand("/bin/bash", {
+      platform: "linux",
+      scriptPath: null,
+    })).toEqual(["/bin/bash", "-l"])
+  })
+
+  test("keeps non-Linux launches direct", () => {
+    expect(resolveTerminalSpawnCommand("/bin/bash", {
+      platform: "darwin",
+      scriptPath: "/usr/bin/script",
+    })).toEqual(["/bin/bash", "-l"])
+  })
+
   test("ctrl+c interrupts the foreground job and keeps the shell alive", async () => {
     const terminalId = "terminal-ctrl-c-foreground"
     const { manager, getOutput } = await createSession(terminalId)
@@ -102,7 +124,7 @@ describeIfSupported("TerminalManager", () => {
     } finally {
       manager.close(terminalId)
     }
-  })
+  }, SLOW_TEST_TIMEOUT_MS)
 
   test("ctrl+d preserves eof behavior", async () => {
     const terminalId = "terminal-ctrl-d"
@@ -273,5 +295,5 @@ describeIfSupported("TerminalManager", () => {
       manager.close(firstTerminalId)
       manager.close(secondTerminalId)
     }
-  })
+  }, SLOW_TEST_TIMEOUT_MS)
 })

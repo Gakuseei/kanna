@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import process from "node:process"
 import defaultShell, { detectDefaultShell } from "default-shell"
@@ -36,6 +37,7 @@ interface TerminalSession {
   terminal: Bun.Terminal
   headless: Terminal
   serializeAddon: SerializeAddon
+  wrappedWithScript: boolean
   focusReportingEnabled: boolean
   modeSequenceTail: string
 }
@@ -73,6 +75,36 @@ function resolveShellArgs(shellPath: string) {
   }
 
   return []
+}
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
+export function resolveTerminalSpawnCommand(
+  shellPath: string,
+  options: {
+    platform?: NodeJS.Platform
+    scriptPath?: string | null
+  } = {},
+) {
+  const platform = options.platform ?? process.platform
+  const shellArgs = resolveShellArgs(shellPath)
+  const directCommand = [shellPath, ...shellArgs]
+
+  if (platform !== "linux") {
+    return directCommand
+  }
+
+  const scriptPath = Object.prototype.hasOwnProperty.call(options, "scriptPath")
+    ? options.scriptPath
+    : Bun.which("script")
+  if (!scriptPath) {
+    return directCommand
+  }
+
+  const wrappedCommand = directCommand.map(shellQuote).join(" ")
+  return [scriptPath, "-qefc", wrappedCommand, "/dev/null"]
 }
 
 function createTerminalEnv() {
@@ -147,6 +179,88 @@ function signalTerminalProcessGroup(subprocess: Bun.Subprocess | null, signal: N
   }
 }
 
+function readChildPids(pid: number) {
+  if (process.platform !== "linux") {
+    return []
+  }
+
+  try {
+    const text = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim()
+    if (!text) {
+      return []
+    }
+
+    return text
+      .split(/\s+/)
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  } catch {
+    return []
+  }
+}
+
+function signalWrappedTerminalDescendants(subprocess: Bun.Subprocess | null, signal: NodeJS.Signals) {
+  if (!subprocess || process.platform !== "linux") {
+    return false
+  }
+
+  const rootPid = subprocess.pid
+  if (typeof rootPid !== "number") {
+    return false
+  }
+
+  const stack = [...readChildPids(rootPid)]
+  if (stack.length === 0) {
+    return false
+  }
+
+  const leafPids: number[] = []
+
+  while (stack.length > 0) {
+    const pid = stack.pop()
+    if (typeof pid !== "number") {
+      continue
+    }
+
+    const childPids = readChildPids(pid)
+    if (childPids.length === 0) {
+      leafPids.push(pid)
+      continue
+    }
+
+    stack.push(...childPids)
+  }
+
+  let signaled = false
+
+  for (const pid of leafPids) {
+    try {
+      process.kill(-pid, signal)
+      signaled = true
+      continue
+    } catch {
+      // Fall back to signaling just the leaf process when it is not the group leader.
+    }
+
+    try {
+      process.kill(pid, signal)
+      signaled = true
+    } catch {
+      // Ignore descendant signaling failures and continue trying other leaves.
+    }
+  }
+
+  return signaled
+}
+
+function signalActiveTerminalProcess(session: Pick<TerminalSession, "process" | "wrappedWithScript">, signal: NodeJS.Signals) {
+  if (session.wrappedWithScript) {
+    return signalWrappedTerminalDescendants(session.process, signal) || signalTerminalProcessGroup(session.process, signal)
+  }
+
+  return signalTerminalProcessGroup(session.process, signal)
+}
+
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>()
   private readonly listeners = new Set<(event: TerminalEvent) => void>()
@@ -174,7 +288,7 @@ export class TerminalManager {
       existing.headless.options.scrollback = existing.scrollback
       existing.headless.resize(existing.cols, existing.rows)
       existing.terminal.resize(existing.cols, existing.rows)
-      signalTerminalProcessGroup(existing.process, "SIGWINCH")
+      signalActiveTerminalProcess(existing, "SIGWINCH")
       return this.snapshotOf(existing)
     }
 
@@ -215,12 +329,15 @@ export class TerminalManager {
       }),
       headless,
       serializeAddon,
+      wrappedWithScript: false,
       focusReportingEnabled: false,
       modeSequenceTail: "",
     }
 
     try {
-      session.process = Bun.spawn([shell, ...resolveShellArgs(shell)], {
+      const spawnCommand = resolveTerminalSpawnCommand(shell)
+      session.wrappedWithScript = spawnCommand[0] !== shell
+      session.process = Bun.spawn(spawnCommand, {
         cwd: args.projectPath,
         env: createTerminalEnv(),
         terminal: session.terminal,
@@ -278,18 +395,32 @@ export class TerminalManager {
 
     while (cursor < filteredData.length) {
       const ctrlCIndex = filteredData.indexOf("\x03", cursor)
+      const ctrlDIndex = filteredData.indexOf("\x04", cursor)
+      const nextControlIndex = [ctrlCIndex, ctrlDIndex].filter((index) => index >= 0).sort((left, right) => left - right)[0]
 
-      if (ctrlCIndex === -1) {
+      if (nextControlIndex === undefined) {
         session.terminal.write(filteredData.slice(cursor))
         return
       }
 
-      if (ctrlCIndex > cursor) {
-        session.terminal.write(filteredData.slice(cursor, ctrlCIndex))
+      if (nextControlIndex > cursor) {
+        session.terminal.write(filteredData.slice(cursor, nextControlIndex))
       }
 
-      signalTerminalProcessGroup(session.process, "SIGINT")
-      cursor = ctrlCIndex + 1
+      if (nextControlIndex === ctrlCIndex) {
+        signalActiveTerminalProcess(session, "SIGINT")
+        cursor = ctrlCIndex + 1
+        continue
+      }
+
+      if (session.wrappedWithScript) {
+        // `script` does not propagate a raw Ctrl+D byte as prompt EOF reliably, so
+        // emulate the shell's prompt-exit path when the wrapper is active.
+        session.terminal.write("exit\r")
+      } else {
+        session.terminal.write("\x04")
+      }
+      cursor = ctrlDIndex + 1
     }
   }
 
@@ -300,7 +431,7 @@ export class TerminalManager {
     session.rows = normalizeTerminalDimension(rows, session.rows)
     session.headless.resize(session.cols, session.rows)
     session.terminal.resize(session.cols, session.rows)
-    signalTerminalProcessGroup(session.process, "SIGWINCH")
+    signalActiveTerminalProcess(session, "SIGWINCH")
   }
 
   close(terminalId: string) {
