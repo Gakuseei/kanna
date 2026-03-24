@@ -68,6 +68,43 @@ export function extractImageFiles(fileList: Iterable<File>) {
   return [...fileList].filter((file) => ACCEPTED_IMAGE_TYPES.has(file.type))
 }
 
+function fileIdentity(file: File) {
+  return [file.name, file.type, file.size, file.lastModified].join(":")
+}
+
+function dedupeImageFiles(files: File[]) {
+  const uniqueFiles = new Map<string, File>()
+  for (const file of files) {
+    uniqueFiles.set(fileIdentity(file), file)
+  }
+  return [...uniqueFiles.values()]
+}
+
+function fileFromClipboardItem(item: DataTransferItem) {
+  if (item.kind !== "file" || !item.type.startsWith("image/")) {
+    return null
+  }
+
+  const file = item.getAsFile()
+  return file instanceof File ? file : null
+}
+
+export function extractImageFilesFromDataTransfer(dataTransfer: Pick<DataTransfer, "files" | "items"> | null | undefined) {
+  if (!dataTransfer) {
+    return []
+  }
+
+  const filesFromList = extractImageFiles(dataTransfer.files ?? [])
+  const filesFromItems = Array.from(dataTransfer.items ?? [])
+    .map(fileFromClipboardItem)
+    .filter((file): file is File => file !== null)
+
+  return dedupeImageFiles([
+    ...filesFromList,
+    ...extractImageFiles(filesFromItems),
+  ])
+}
+
 export async function stageImages(files: File[]): Promise<StagedImageUpload[]> {
   const formData = new FormData()
   for (const file of files) {

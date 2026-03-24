@@ -21,6 +21,7 @@ import {
 import {
   createPendingComposerImages,
   extractImageFiles,
+  extractImageFilesFromDataTransfer,
   revokePendingComposerImages,
   stageImages,
   type PendingComposerImage,
@@ -407,7 +408,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }
 
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = extractImageFiles(event.clipboardData.files)
+    const files = extractImageFilesFromDataTransfer(event.clipboardData)
     if (files.length === 0) {
       return
     }
