@@ -68,6 +68,25 @@ export function extractImageFiles(fileList: Iterable<File>) {
   return [...fileList].filter((file) => ACCEPTED_IMAGE_TYPES.has(file.type))
 }
 
+export function clipboardHasTextPayload(dataTransfer: Pick<DataTransfer, "types" | "getData"> | null | undefined) {
+  if (!dataTransfer) {
+    return false
+  }
+
+  const clipboardTypes = Array.from(dataTransfer.types ?? [])
+  if (clipboardTypes.some((type) => type.startsWith("text/"))) {
+    return true
+  }
+
+  return ["text/plain", "text/html", "text/uri-list"].some((type) => {
+    try {
+      return dataTransfer.getData(type).trim().length > 0
+    } catch {
+      return false
+    }
+  })
+}
+
 function fileIdentity(file: File) {
   return [file.name, file.type, file.size, file.lastModified].join(":")
 }
@@ -103,6 +122,66 @@ export function extractImageFilesFromDataTransfer(dataTransfer: Pick<DataTransfe
     ...filesFromList,
     ...extractImageFiles(filesFromItems),
   ])
+}
+
+function isTauriDesktopWindow() {
+  if (typeof window === "undefined") {
+    return false
+  }
+
+  return "__TAURI_INTERNALS__" in window || "__TAURI__" in window
+}
+
+async function clipboardImageToFile(image: {
+  rgba: () => Promise<Uint8Array>
+  size: () => Promise<{ width: number; height: number }>
+}) {
+  const [{ width, height }, rgba] = await Promise.all([
+    image.size(),
+    image.rgba(),
+  ])
+
+  if (width <= 0 || height <= 0) {
+    return null
+  }
+
+  const canvas = document.createElement("canvas")
+  canvas.width = width
+  canvas.height = height
+
+  const context = canvas.getContext("2d")
+  if (!context) {
+    return null
+  }
+
+  const imageData = new ImageData(new Uint8ClampedArray(rgba), width, height)
+  context.putImageData(imageData, 0, 0)
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/png")
+  })
+  if (!blob) {
+    return null
+  }
+
+  return new File([blob], `clipboard-${Date.now()}.png`, {
+    type: "image/png",
+    lastModified: Date.now(),
+  })
+}
+
+export async function readNativeClipboardImageFile() {
+  if (!isTauriDesktopWindow()) {
+    return null
+  }
+
+  try {
+    const { readImage } = await import("@tauri-apps/plugin-clipboard-manager")
+    const image = await readImage()
+    return await clipboardImageToFile(image)
+  } catch {
+    return null
+  }
 }
 
 export async function stageImages(files: File[]): Promise<StagedImageUpload[]> {

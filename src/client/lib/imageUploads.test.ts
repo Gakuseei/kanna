@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { extractImageFilesFromDataTransfer } from "./imageUploads"
+import { clipboardHasTextPayload, extractImageFilesFromDataTransfer } from "./imageUploads"
 
 function createTransferFile(name: string, type: string, content = "test") {
   return new File([content], name, { type, lastModified: 123 })
@@ -59,5 +59,28 @@ describe("extractImageFilesFromDataTransfer", () => {
     })
 
     expect(result).toEqual([])
+  })
+})
+
+describe("clipboardHasTextPayload", () => {
+  test("detects plain text clipboard types", () => {
+    expect(clipboardHasTextPayload({
+      types: ["text/plain"] as unknown as DOMStringList,
+      getData: () => "",
+    })).toBe(true)
+  })
+
+  test("detects clipboard text via getData fallback", () => {
+    expect(clipboardHasTextPayload({
+      types: [] as unknown as DOMStringList,
+      getData: (type: string) => (type === "text/plain" ? "hello" : ""),
+    })).toBe(true)
+  })
+
+  test("returns false for image-only clipboard payloads", () => {
+    expect(clipboardHasTextPayload({
+      types: ["image/png"] as unknown as DOMStringList,
+      getData: () => "",
+    })).toBe(false)
   })
 })

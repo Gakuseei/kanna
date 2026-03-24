@@ -19,9 +19,11 @@ import {
   type ProviderCatalogEntry,
 } from "../../../shared/types"
 import {
+  clipboardHasTextPayload,
   createPendingComposerImages,
   extractImageFiles,
   extractImageFilesFromDataTransfer,
+  readNativeClipboardImageFile,
   revokePendingComposerImages,
   stageImages,
   type PendingComposerImage,
@@ -155,6 +157,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingImagesRef = useRef<PendingComposerImage[]>([])
+  const nativePasteFallbackRef = useRef<number | null>(null)
   const isStandalone = useIsStandalone()
   const [lockedComposerState, setLockedComposerState] = useState<ComposerState | null>(() => (
     activeProvider ? createLockedComposerState(activeProvider, composerState, providerDefaults) : null
@@ -230,6 +233,12 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
 
   useEffect(() => () => {
     revokePendingComposerImages(pendingImagesRef.current)
+  }, [])
+
+  useEffect(() => () => {
+    if (nativePasteFallbackRef.current !== null) {
+      window.clearTimeout(nativePasteFallbackRef.current)
+    }
   }, [])
 
   function setReasoningEffort(reasoningEffort: string) {
@@ -315,6 +324,36 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     }
   }
 
+  function clearNativePasteFallback() {
+    if (nativePasteFallbackRef.current === null) {
+      return
+    }
+
+    window.clearTimeout(nativePasteFallbackRef.current)
+    nativePasteFallbackRef.current = null
+  }
+
+  async function addNativeClipboardImage(showEmptyError = false) {
+    const file = await readNativeClipboardImageFile()
+    if (!file) {
+      if (showEmptyError) {
+        setSubmitError("Clipboard does not contain a supported image.")
+      }
+      return false
+    }
+
+    await addPendingFiles([file])
+    return true
+  }
+
+  function scheduleNativeClipboardFallback() {
+    clearNativePasteFallback()
+    nativePasteFallbackRef.current = window.setTimeout(() => {
+      nativePasteFallbackRef.current = null
+      void addNativeClipboardImage()
+    }, 60)
+  }
+
   async function handleSubmit() {
     if (!hasDraftContent || isSubmitting) return
 
@@ -382,6 +421,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v") {
+      scheduleNativeClipboardFallback()
+    }
+
     if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
       focusNextChatInput(textareaRef.current, document)
@@ -408,8 +451,14 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }
 
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    clearNativePasteFallback()
+
     const files = extractImageFilesFromDataTransfer(event.clipboardData)
     if (files.length === 0) {
+      if (!clipboardHasTextPayload(event.clipboardData)) {
+        event.preventDefault()
+        void addNativeClipboardImage(true)
+      }
       return
     }
 
