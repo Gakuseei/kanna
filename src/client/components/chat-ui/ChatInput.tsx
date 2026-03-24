@@ -299,7 +299,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }, [syncCaretPosition, value])
 
   useEffect(() => {
-    if (!isSkillPickerOpen || availableSkills !== null || isLoadingSkills) {
+    if (!isSkillPickerOpen || availableSkills !== null) {
       return
     }
 
@@ -327,7 +327,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     return () => {
       cancelled = true
     }
-  }, [availableSkills, isLoadingSkills, isSkillPickerOpen, socket])
+  }, [availableSkills, isSkillPickerOpen, socket])
 
   useEffect(() => {
     if (!isSkillPickerOpen) {
