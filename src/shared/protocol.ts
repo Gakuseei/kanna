@@ -4,6 +4,7 @@ import type {
   KeybindingsSnapshot,
   LocalProjectsSnapshot,
   ModelOptions,
+  SkillCatalogEntry,
   SidebarData,
   UpdateSnapshot,
 } from "./types"
@@ -48,6 +49,7 @@ export type ClientCommand =
   | { type: "system.ping" }
   | { type: "update.check"; force?: boolean }
   | { type: "update.install" }
+  | { type: "skills.list" }
   | { type: "settings.readKeybindings" }
   | { type: "settings.writeKeybindings"; bindings: KeybindingsSnapshot["bindings"] }
   | {
@@ -96,7 +98,7 @@ export type ServerSnapshot =
 export type ServerEnvelope =
   | { v: 1; type: "snapshot"; id: string; snapshot: ServerSnapshot }
   | { v: 1; type: "event"; id: string; event: TerminalEvent }
-  | { v: 1; type: "ack"; id: string; result?: unknown }
+  | { v: 1; type: "ack"; id: string; result?: unknown | SkillCatalogEntry[] }
   | { v: 1; type: "error"; id?: string; message: string }
 
 export function isClientEnvelope(value: unknown): value is ClientEnvelope {

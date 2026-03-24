@@ -342,6 +342,7 @@ export function ChatPage() {
             onCancel={() => {
               void state.handleCancel()
             }}
+            socket={state.socket}
             disabled={!state.hasSelectedProject || state.runtime?.status === "waiting_for_user"}
             canCancel={state.canCancel}
             chatId={state.activeChatId}

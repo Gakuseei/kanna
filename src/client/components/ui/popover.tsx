@@ -4,6 +4,7 @@ import { cn } from "../../lib/utils"
 import { FOCUS_FALLBACK_IGNORE_ATTRIBUTE, RESTORE_CHAT_INPUT_FOCUS_EVENT } from "../../app/chatFocusPolicy"
 
 const Popover = PopoverPrimitive.Root
+const PopoverAnchor = PopoverPrimitive.Anchor
 
 const PopoverTrigger = PopoverPrimitive.Trigger
 
@@ -32,4 +33,4 @@ const PopoverContent = React.forwardRef<
 ))
 PopoverContent.displayName = PopoverPrimitive.Content.displayName
 
-export { Popover, PopoverTrigger, PopoverContent }
+export { Popover, PopoverAnchor, PopoverTrigger, PopoverContent }

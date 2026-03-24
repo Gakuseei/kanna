@@ -8,6 +8,7 @@ import { EventStore } from "./event-store"
 import { openExternal } from "./external-open"
 import { KeybindingsManager } from "./keybindings"
 import { ensureProjectDirectory } from "./paths"
+import { listInstalledSkills } from "./skills"
 import { TerminalManager } from "./terminal-manager"
 import type { UpdateManager } from "./update-manager"
 import { deriveChatSnapshot, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
@@ -217,6 +218,10 @@ export function createWsRouter({
             id,
             result,
           })
+          return
+        }
+        case "skills.list": {
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: listInstalledSkills() })
           return
         }
         case "settings.readKeybindings": {

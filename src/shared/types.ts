@@ -114,6 +114,13 @@ export function getProviderCatalog(provider: AgentProvider): ProviderCatalogEntr
   return entry
 }
 
+export interface SkillCatalogEntry {
+  id: string
+  label: string
+  description: string
+  source: "codex" | "agents"
+}
+
 export type KannaStatus =
   | "idle"
   | "starting"
