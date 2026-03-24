@@ -132,42 +132,13 @@ function isTauriDesktopWindow() {
   return "__TAURI_INTERNALS__" in window || "__TAURI__" in window
 }
 
-async function clipboardImageToFile(image: {
-  rgba: () => Promise<Uint8Array>
-  size: () => Promise<{ width: number; height: number }>
-}) {
-  const [{ width, height }, rgba] = await Promise.all([
-    image.size(),
-    image.rgba(),
-  ])
-
-  if (width <= 0 || height <= 0) {
-    return null
+function decodeBase64(base64: string) {
+  const binary = window.atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
   }
-
-  const canvas = document.createElement("canvas")
-  canvas.width = width
-  canvas.height = height
-
-  const context = canvas.getContext("2d")
-  if (!context) {
-    return null
-  }
-
-  const imageData = new ImageData(new Uint8ClampedArray(rgba), width, height)
-  context.putImageData(imageData, 0, 0)
-
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, "image/png")
-  })
-  if (!blob) {
-    return null
-  }
-
-  return new File([blob], `clipboard-${Date.now()}.png`, {
-    type: "image/png",
-    lastModified: Date.now(),
-  })
+  return bytes
 }
 
 export async function readNativeClipboardImageFile() {
@@ -176,9 +147,21 @@ export async function readNativeClipboardImageFile() {
   }
 
   try {
-    const { readImage } = await import("@tauri-apps/plugin-clipboard-manager")
-    const image = await readImage()
-    return await clipboardImageToFile(image)
+    const { invoke } = await import("@tauri-apps/api/core")
+    const payload = await invoke<{
+      pngBase64: string
+      width: number
+      height: number
+    } | null>("read_clipboard_image")
+    if (!payload) {
+      return null
+    }
+
+    const bytes = decodeBase64(payload.pngBase64)
+    return new File([bytes], `clipboard-${Date.now()}.png`, {
+      type: "image/png",
+      lastModified: Date.now(),
+    })
   } catch {
     return null
   }

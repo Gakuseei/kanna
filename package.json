@@ -46,7 +46,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
     "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-select": "^2.2.6",
-    "@tauri-apps/plugin-clipboard-manager": "^2.3.0",
+    "@tauri-apps/api": "^2.10.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-web-links": "^0.12.0",
