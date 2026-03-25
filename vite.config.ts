@@ -1,6 +1,7 @@
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
-import { DEV_CLIENT_PORT, DEV_SERVER_PORT } from "./src/shared/ports"
+import { getDefaultDevServerPort } from "./src/shared/dev-ports"
+import { DEV_CLIENT_PORT } from "./src/shared/ports"
 
 function getAllowedHosts() {
   const defaults = ["localhost", "127.0.0.1", "0.0.0.0"]
@@ -22,7 +23,13 @@ function getBackendTargetHost() {
   return process.env.KANNA_DEV_BACKEND_TARGET_HOST || "127.0.0.1"
 }
 
+function getBackendPort() {
+  const configured = Number(process.env.KANNA_DEV_BACKEND_PORT)
+  return Number.isFinite(configured) && configured > 0 ? configured : getDefaultDevServerPort(DEV_CLIENT_PORT)
+}
+
 const backendTargetHost = getBackendTargetHost()
+const backendPort = getBackendPort()
 
 export default defineConfig({
   plugins: [react()],
@@ -32,11 +39,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/ws": {
-        target: `ws://${backendTargetHost}:${DEV_SERVER_PORT}`,
+        target: `ws://${backendTargetHost}:${backendPort}`,
         ws: true,
       },
       "/health": {
-        target: `http://${backendTargetHost}:${DEV_SERVER_PORT}`,
+        target: `http://${backendTargetHost}:${backendPort}`,
       },
     },
     allowedHosts: getAllowedHosts(),

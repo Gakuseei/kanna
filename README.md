@@ -139,12 +139,13 @@ bun run dev
 ```
 
 The same `--remote` and `--host` flags can be used with `bun run dev` for remote development.
+Use `bun run dev --port 4000` to run the Vite client on `4000` and the backend on `4001`.
 
 Or run client and server separately:
 
 ```bash
 bun run dev:client   # http://localhost:5174
-bun run dev:server   # http://localhost:3211
+bun run dev:server   # http://localhost:5175
 ```
 
 ## Scripts
