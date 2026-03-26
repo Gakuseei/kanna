@@ -88,6 +88,15 @@ describe("chat preference store", () => {
     expect(state.providerDefaults).toEqual(INITIAL_STATE.providerDefaults)
   })
 
+  test("stores transcript auto-scroll independently", () => {
+    useChatPreferencesStore.getState().setTranscriptAutoScroll(false)
+
+    const state = useChatPreferencesStore.getState()
+    expect(state.transcriptAutoScroll).toBe(false)
+    expect(state.composerState).toEqual(INITIAL_STATE.composerState)
+    expect(state.providerDefaults).toEqual(INITIAL_STATE.providerDefaults)
+  })
+
   test("resetComposerFromProvider copies provider defaults into composer state", () => {
     useChatPreferencesStore.setState({
       ...INITIAL_STATE,
@@ -161,5 +170,13 @@ describe("chat preference store", () => {
       modelOptions: { reasoningEffort: "low", fastMode: false },
       planMode: true,
     })
+  })
+
+  test("migration defaults transcript auto-scroll to enabled", () => {
+    const migrated = migrateChatPreferencesState({
+      defaultProvider: "last_used",
+    })
+
+    expect(migrated.transcriptAutoScroll).toBe(true)
   })
 })

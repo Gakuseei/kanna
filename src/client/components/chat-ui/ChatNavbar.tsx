@@ -1,6 +1,7 @@
-import { Flower, Code, FolderOpen, Menu, PanelLeft, PanelRight, SquarePen, Terminal } from "lucide-react"
+import { Flower, Code, FolderOpen, Menu, PanelLeft, PanelRight, Settings2, SquarePen, Terminal } from "lucide-react"
 import { Button } from "../ui/button"
 import { CardHeader } from "../ui/card"
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
 import { HotkeyTooltip, HotkeyTooltipContent, HotkeyTooltipTrigger } from "../ui/tooltip"
 import { cn } from "../../lib/utils"
 
@@ -16,6 +17,8 @@ interface Props {
   onToggleRightSidebar?: () => void
   onOpenExternal?: (action: "open_finder" | "open_editor") => void
   editorLabel?: string
+  transcriptAutoScroll: boolean
+  onTranscriptAutoScrollChange: (enabled: boolean) => void
   finderShortcut?: string[]
   editorShortcut?: string[]
   terminalShortcut?: string[]
@@ -34,6 +37,8 @@ export function ChatNavbar({
   onToggleRightSidebar,
   onOpenExternal,
   editorLabel = "Editor",
+  transcriptAutoScroll,
+  onTranscriptAutoScrollChange,
   finderShortcut,
   editorShortcut,
   terminalShortcut,
@@ -158,6 +163,56 @@ export function ChatNavbar({
               <HotkeyTooltipContent side="bottom" shortcut={rightSidebarShortcut} />
             </HotkeyTooltip>
           ) : null}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="border border-border/0"
+                title="Chat settings"
+              >
+                <Settings2 className="h-4.5 w-4.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-3">
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Chat settings</div>
+                  <div className="text-xs text-muted-foreground">
+                    Control whether the transcript follows new messages automatically.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={transcriptAutoScroll}
+                  onClick={() => onTranscriptAutoScrollChange(!transcriptAutoScroll)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-left transition-colors hover:bg-muted/40"
+                >
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Auto-scroll</div>
+                    <div className="text-xs text-muted-foreground">
+                      {transcriptAutoScroll ? "Follow incoming messages" : "Keep the current scroll position"}
+                    </div>
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors",
+                      transcriptAutoScroll ? "border-primary bg-primary" : "border-border bg-muted"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 h-4.5 w-4.5 rounded-full bg-background shadow-sm transition-transform",
+                        transcriptAutoScroll ? "translate-x-5" : "translate-x-0.5"
+                      )}
+                    />
+                  </span>
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
     </CardHeader>

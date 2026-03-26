@@ -159,10 +159,12 @@ export interface KannaState {
   navbarLocalPath?: string
   editorLabel: string
   hasSelectedProject: boolean
+  transcriptAutoScroll: boolean
   openSidebar: () => void
   closeSidebar: () => void
   collapseSidebar: () => void
   expandSidebar: () => void
+  setTranscriptAutoScroll: (enabled: boolean) => void
   updateScrollState: () => void
   scrollToBottom: () => void
   handleCreateChat: (projectId: string) => Promise<void>
@@ -214,10 +216,13 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [startingLocalPath, setStartingLocalPath] = useState<string | null>(null)
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
   const editorLabel = getEditorPresetLabel(useTerminalPreferencesStore((store) => store.editorPreset))
+  const transcriptAutoScroll = useChatPreferencesStore((store) => store.transcriptAutoScroll)
+  const setTranscriptAutoScroll = useChatPreferencesStore((store) => store.setTranscriptAutoScroll)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLDivElement>(null)
   const autoFollowTranscriptRef = useRef(true)
+  const initialScrollCompletedRef = useRef(false)
 
   useEffect(() => socket.onStatus(setConnectionStatus), [socket])
 
@@ -345,6 +350,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
   useEffect(() => {
     autoFollowTranscriptRef.current = true
+    initialScrollCompletedRef.current = false
     setIsAtBottom(true)
   }, [activeChatId])
 
@@ -394,17 +400,28 @@ export function useKannaState(activeChatId: string | null): KannaState {
     ?? fallbackLocalProjectPath
   )
 
+  useLayoutEffect(() => {
+    if (initialScrollCompletedRef.current) return
+
+    const element = scrollRef.current
+    if (!element) return
+    if (activeChatId && !runtime) return
+
+    element.scrollTo({ top: element.scrollHeight, behavior: "auto" })
+    initialScrollCompletedRef.current = true
+  }, [activeChatId, inputHeight, messages.length, runtime])
+
   useEffect(() => {
-    if (!autoFollowTranscriptRef.current) return
+    if (!initialScrollCompletedRef.current || !transcriptAutoScroll || !autoFollowTranscriptRef.current) return
 
     const frameId = window.requestAnimationFrame(() => {
       const element = scrollRef.current
-      if (!element || !autoFollowTranscriptRef.current) return
+      if (!element || !transcriptAutoScroll || !autoFollowTranscriptRef.current) return
       element.scrollTo({ top: element.scrollHeight, behavior: "auto" })
     })
 
     return () => window.cancelAnimationFrame(frameId)
-  }, [activeChatId, inputHeight, messages.length, runtime?.status])
+  }, [activeChatId, inputHeight, messages.length, runtime?.status, transcriptAutoScroll])
 
   function updateScrollState() {
     const element = scrollRef.current
@@ -422,6 +439,14 @@ export function useKannaState(activeChatId: string | null): KannaState {
     setIsAtBottom(true)
     element.scrollTo({ top: element.scrollHeight, behavior: "smooth" })
   }
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      updateScrollState()
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [inputHeight, messages.length, runtime?.status])
 
   async function createChatForProject(projectId: string) {
     useChatPreferencesStore.getState().initializeComposerForNewChat()
@@ -753,10 +778,12 @@ export function useKannaState(activeChatId: string | null): KannaState {
     navbarLocalPath,
     editorLabel,
     hasSelectedProject,
+    transcriptAutoScroll,
     openSidebar: () => setSidebarOpen(true),
     closeSidebar: () => setSidebarOpen(false),
     collapseSidebar: () => setSidebarCollapsed(true),
     expandSidebar: () => setSidebarCollapsed(false),
+    setTranscriptAutoScroll,
     updateScrollState,
     scrollToBottom,
     handleCreateChat,

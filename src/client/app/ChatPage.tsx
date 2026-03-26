@@ -27,7 +27,6 @@ import { KannaTranscript } from "./KannaTranscript"
 import { useStickyChatFocus } from "./useStickyChatFocus"
 
 const EMPTY_STATE_TEXT = "What are we building?"
-const EMPTY_STATE_TYPING_INTERVAL_MS = 19
 const CHAT_NAVBAR_OFFSET_PX = 72
 const SCROLL_BUTTON_BOTTOM_PX = 120
 
@@ -36,8 +35,6 @@ export function ChatPage() {
   const layoutRootRef = useRef<HTMLDivElement>(null)
   const chatCardRef = useRef<HTMLDivElement>(null)
   const chatInputRef = useRef<HTMLTextAreaElement>(null)
-  const [typedEmptyStateText, setTypedEmptyStateText] = useState("")
-  const [isEmptyStateTypingComplete, setIsEmptyStateTypingComplete] = useState(false)
   const [fixedTerminalHeight, setFixedTerminalHeight] = useState(0)
   const projectId = state.runtime?.projectId ?? null
   const projectTerminalLayout = useTerminalLayoutStore((store) => (projectId ? store.projects[projectId] : undefined))
@@ -92,26 +89,6 @@ export function ChatPage() {
     enabled: state.hasSelectedProject && state.runtime?.status !== "waiting_for_user",
     canCancel: state.canCancel,
   })
-
-  useEffect(() => {
-    if (state.messages.length !== 0) return
-
-    setTypedEmptyStateText("")
-    setIsEmptyStateTypingComplete(false)
-
-    let characterIndex = 0
-    const interval = window.setInterval(() => {
-      characterIndex += 1
-      setTypedEmptyStateText(EMPTY_STATE_TEXT.slice(0, characterIndex))
-
-      if (characterIndex >= EMPTY_STATE_TEXT.length) {
-        window.clearInterval(interval)
-        setIsEmptyStateTypingComplete(true)
-      }
-    }, EMPTY_STATE_TYPING_INTERVAL_MS)
-
-    return () => window.clearInterval(interval)
-  }, [state.activeChatId, state.messages.length])
 
   useEffect(() => {
     function handleGlobalKeydown(event: KeyboardEvent) {
@@ -230,6 +207,8 @@ export function ChatPage() {
             void state.handleOpenExternal(action)
           }}
           editorLabel={state.editorLabel}
+          transcriptAutoScroll={state.transcriptAutoScroll}
+          onTranscriptAutoScrollChange={state.setTranscriptAutoScroll}
           finderShortcut={resolvedKeybindings.bindings.openInFinder}
           editorShortcut={resolvedKeybindings.bindings.openInEditor}
           terminalShortcut={resolvedKeybindings.bindings.toggleEmbeddedTerminal}
@@ -244,7 +223,7 @@ export function ChatPage() {
           {state.messages.length === 0 ? <div style={{ height: state.transcriptPaddingBottom }} aria-hidden="true" /> : null}
           {state.messages.length > 0 ? (
             <>
-              <div className="animate-fade-in space-y-5 pt-[72px] max-w-[800px] mx-auto">
+              <div className="space-y-5 pt-[72px] max-w-[800px] mx-auto">
                 <KannaTranscript
                   messages={state.messages}
                   isLoading={state.isProcessing}
@@ -269,7 +248,7 @@ export function ChatPage() {
         {state.messages.length === 0 ? (
           <div
             key={state.activeChatId ?? "new-chat"}
-            className="pointer-events-none absolute inset-x-4 animate-fade-in"
+            className="pointer-events-none absolute inset-x-4"
             style={{
               top: CHAT_NAVBAR_OFFSET_PX,
               bottom: state.transcriptPaddingBottom,
@@ -277,26 +256,12 @@ export function ChatPage() {
           >
             <div className="mx-auto flex h-full max-w-[800px] items-center justify-center">
               <div className="flex flex-col items-center justify-center text-muted-foreground gap-4 opacity-70">
-                <Flower strokeWidth={1.5} className="size-8 text-muted-foreground kanna-empty-state-flower"></Flower>
+                <Flower strokeWidth={1.5} className="size-8 text-muted-foreground" />
                 <div
-                  className="text-base font-normal text-muted-foreground text-center max-w-xs flex items-center kanna-empty-state-text"
+                  className="text-base font-normal text-muted-foreground text-center max-w-xs flex items-center"
                   aria-label={EMPTY_STATE_TEXT}
                 >
-                  <span className="relative inline-grid place-items-start">
-                    <span className="invisible col-start-1 row-start-1 whitespace-pre flex items-center">
-                      <span>{EMPTY_STATE_TEXT}</span>
-                      <span className="kanna-typewriter-cursor-slot" aria-hidden="true" />
-                    </span>
-                    <span className="col-start-1 row-start-1 whitespace-pre flex items-center">
-                      <span>{typedEmptyStateText}</span>
-                      <span className="kanna-typewriter-cursor-slot" aria-hidden="true">
-                        <span
-                          className="kanna-typewriter-cursor"
-                          data-typing-complete={isEmptyStateTypingComplete ? "true" : "false"}
-                        />
-                      </span>
-                    </span>
-                  </span>
+                  <span>{EMPTY_STATE_TEXT}</span>
                 </div>
               </div>
             </div>
