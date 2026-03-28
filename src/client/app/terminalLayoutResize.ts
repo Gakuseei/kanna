@@ -1,5 +1,3 @@
-import { DEFAULT_TERMINAL_MAIN_SIZES } from "../stores/terminalLayoutStore"
-
 export const TERMINAL_CLOSE_HEIGHT_THRESHOLD_PX = 35
 
 export function getTerminalHeightFromContainer(containerHeight: number, terminalSizePercent: number) {
@@ -11,8 +9,4 @@ export function getTerminalHeightFromContainer(containerHeight: number, terminal
 export function shouldCloseTerminalPane(containerHeight: number, terminalSizePercent: number) {
   const terminalHeight = getTerminalHeightFromContainer(containerHeight, terminalSizePercent)
   return terminalHeight >= 0 && terminalHeight < TERMINAL_CLOSE_HEIGHT_THRESHOLD_PX
-}
-
-export function getDefaultTerminalMainSizes(): [number, number] {
-  return [...DEFAULT_TERMINAL_MAIN_SIZES]
 }

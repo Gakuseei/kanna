@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  getDefaultTerminalMainSizes,
   getTerminalHeightFromContainer,
   shouldCloseTerminalPane,
   TERMINAL_CLOSE_HEIGHT_THRESHOLD_PX,
@@ -17,14 +16,6 @@ describe("terminalLayoutResize", () => {
     expect(shouldCloseTerminalPane(1000, 3.4)).toBe(true)
     expect(shouldCloseTerminalPane(1000, 3.5)).toBe(false)
     expect(shouldCloseTerminalPane(1000, 0)).toBe(true)
-  })
-
-  test("returns a fresh copy of the default main sizes", () => {
-    const sizes = getDefaultTerminalMainSizes()
-    expect(sizes).toEqual([68, 32])
-
-    sizes[0] = 100
-    expect(getDefaultTerminalMainSizes()).toEqual([68, 32])
   })
 
   test("exports the agreed close threshold", () => {
