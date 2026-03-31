@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import type { ImageAttachment } from "../../../shared/types"
+import { resolveServerUrl } from "../../lib/runtime"
 import { Button } from "../ui/button"
 import { Dialog, DialogContent } from "../ui/dialog"
 
@@ -44,7 +45,7 @@ export function ImageLightbox({
       >
         <div className="relative flex min-h-[60vh] items-center justify-center">
           <img
-            src={activeAttachment.url}
+            src={resolveServerUrl(activeAttachment.url)}
             alt={activeAttachment.fileName}
             className="max-h-[88vh] w-auto max-w-full rounded-3xl border border-white/10 bg-black/40 object-contain shadow-2xl"
           />

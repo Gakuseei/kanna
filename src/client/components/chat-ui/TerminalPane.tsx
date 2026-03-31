@@ -322,7 +322,7 @@ export function TerminalPane({
         scrollback: snapshot.scrollback,
         status: snapshot.status,
         exitCode: snapshot.exitCode,
-        serializedState: snapshot.serializedState,
+        replayBuffer: snapshot.replayBuffer,
       })
       if (lastAppliedSnapshotKeyRef.current === snapshotKey) {
         setMetadata({
@@ -331,7 +331,7 @@ export function TerminalPane({
           status: snapshot.status,
           exitCode: snapshot.exitCode,
         })
-        replayStateRef.current = snapshot.serializedState || null
+        replayStateRef.current = snapshot.replayBuffer || null
         return
       }
       lastAppliedSnapshotKeyRef.current = snapshotKey
@@ -341,11 +341,11 @@ export function TerminalPane({
         status: snapshot.status,
         exitCode: snapshot.exitCode,
       })
-      replayStateRef.current = snapshot.serializedState || null
+      replayStateRef.current = snapshot.replayBuffer || null
       terminal.options.scrollback = snapshot.scrollback
       terminal.reset()
-      if (snapshot.serializedState) {
-        terminal.write(snapshot.serializedState)
+      if (snapshot.replayBuffer) {
+        terminal.write(snapshot.replayBuffer)
       }
       refreshTerminal(terminal)
     }

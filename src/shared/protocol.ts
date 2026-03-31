@@ -32,7 +32,7 @@ export interface TerminalSnapshot {
   cols: number
   rows: number
   scrollback: number
-  serializedState: string
+  replayBuffer: string
   status: "running" | "exited"
   exitCode: number | null
   signal?: number

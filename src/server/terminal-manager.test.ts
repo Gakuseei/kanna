@@ -102,6 +102,7 @@ describeIfSupported("TerminalManager", () => {
 
       const snapshot = manager.getSnapshot(terminalId)
       expect(snapshot?.status).toBe("running")
+      expect(snapshot?.replayBuffer).toContain("__KANNA_AFTER_INT__")
       expect(getOutput()).toContain("__KANNA_AFTER_INT__")
     } finally {
       manager.close(terminalId)
@@ -199,7 +200,8 @@ describeIfSupported("TerminalManager", () => {
         {
           cols: number
           rows: number
-          headless: { resize: (cols: number, rows: number) => void }
+          scrollback: number
+          replayBuffer: string
           terminal: { resize: (cols: number, rows: number) => void }
           process: { pid: number } | null
         }
@@ -222,11 +224,8 @@ describeIfSupported("TerminalManager", () => {
     manager.sessions.set("terminal-resize-sigwinch", {
       cols: 80,
       rows: 24,
-      headless: {
-        resize(cols, rows) {
-          resizeCalls.push({ cols, rows })
-        },
-      },
+      scrollback: 1_000,
+      replayBuffer: "",
       terminal: {
         resize(cols, rows) {
           resizeCalls.push({ cols, rows })
@@ -241,10 +240,7 @@ describeIfSupported("TerminalManager", () => {
       process.kill = originalKill
     }
 
-    expect(resizeCalls).toEqual([
-      { cols: 120, rows: 40 },
-      { cols: 120, rows: 40 },
-    ])
+    expect(resizeCalls).toEqual([{ cols: 120, rows: 40 }])
     expect(killCalls).toContainEqual({ pid: -4321, signal: "SIGWINCH" })
   })
 
@@ -282,15 +278,14 @@ describeIfSupported("TerminalManager", () => {
 
       await createManagedSession(secondTerminalId)
       const before = getOutput(secondTerminalId).length
-      manager.write(secondTerminalId, "cat -v\r")
-      await waitFor(() => getOutput(secondTerminalId).length > before, COMMAND_TIMEOUT_MS)
+      manager.write(secondTerminalId, RAW_READ_HEX_COMMAND)
+      await waitForOutputToContain(() => getOutput(secondTerminalId), "__RAW_READY__", COMMAND_TIMEOUT_MS)
       manager.write(secondTerminalId, FOCUS_IN_SEQUENCE)
-      manager.write(secondTerminalId, "\x03")
-      manager.write(secondTerminalId, "printf '__KANNA_FRESH_SESSION__\\n'\r")
-      await waitForOutputToContain(() => getOutput(secondTerminalId), "__KANNA_FRESH_SESSION__")
+      await waitForOutputToContain(() => getOutput(secondTerminalId), "__EMPTY__", COMMAND_TIMEOUT_MS)
 
       const interactionOutput = getOutput(secondTerminalId).slice(before)
-      expect(interactionOutput).not.toContain("^[[I")
+      expect(interactionOutput).toContain("__EMPTY__")
+      expect(interactionOutput).not.toContain("1b5b49")
     } finally {
       manager.close(firstTerminalId)
       manager.close(secondTerminalId)

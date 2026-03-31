@@ -1,4 +1,5 @@
 import type { StagedImageUpload } from "../../shared/types"
+import { isTauriDesktopWindow, resolveServerUrl } from "./runtime"
 
 export const ACCEPTED_IMAGE_TYPES = new Set([
   "image/png",
@@ -124,14 +125,6 @@ export function extractImageFilesFromDataTransfer(dataTransfer: Pick<DataTransfe
   ])
 }
 
-function isTauriDesktopWindow() {
-  if (typeof window === "undefined") {
-    return false
-  }
-
-  return "__TAURI_INTERNALS__" in window || "__TAURI__" in window
-}
-
 function decodeBase64(base64: string) {
   const binary = window.atob(base64)
   const bytes = new Uint8Array(binary.length)
@@ -173,7 +166,7 @@ export async function stageImages(files: File[]): Promise<StagedImageUpload[]> {
     formData.append("files", file, file.name)
   }
 
-  const response = await fetch("/api/media/images/stage", {
+  const response = await fetch(resolveServerUrl("/api/media/images/stage"), {
     method: "POST",
     body: formData,
   })

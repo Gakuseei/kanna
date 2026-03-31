@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import process from "node:process"
 import defaultShell, { detectDefaultShell } from "default-shell"
-import { Terminal } from "@xterm/headless"
-import { SerializeAddon } from "@xterm/addon-serialize"
 import type { TerminalEvent, TerminalSnapshot } from "../shared/protocol"
 
 const DEFAULT_COLS = 80
@@ -14,6 +12,8 @@ const MAX_SCROLLBACK = 5_000
 const FOCUS_IN_SEQUENCE = "\x1b[I"
 const FOCUS_OUT_SEQUENCE = "\x1b[O"
 const MODE_SEQUENCE_TAIL_LENGTH = 16
+const MIN_REPLAY_BUFFER_CHARS = 8_192
+const MAX_REPLAY_BUFFER_CHARS = 250_000
 
 interface CreateTerminalArgs {
   projectPath: string
@@ -35,8 +35,7 @@ interface TerminalSession {
   exitCode: number | null
   process: Bun.Subprocess | null
   terminal: Bun.Terminal
-  headless: Terminal
-  serializeAddon: SerializeAddon
+  replayBuffer: string
   wrappedWithScript: boolean
   focusReportingEnabled: boolean
   modeSequenceTail: string
@@ -132,6 +131,26 @@ function filterFocusReportInput(data: string, allowFocusReporting: boolean) {
   }
 
   return data.replaceAll(FOCUS_IN_SEQUENCE, "").replaceAll(FOCUS_OUT_SEQUENCE, "")
+}
+
+function getReplayBufferLimit(session: Pick<TerminalSession, "cols" | "scrollback">) {
+  const estimatedChars = session.scrollback * Math.max(session.cols, 20) * 4
+  return Math.min(MAX_REPLAY_BUFFER_CHARS, Math.max(MIN_REPLAY_BUFFER_CHARS, estimatedChars))
+}
+
+function trimReplayBuffer(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  const fallbackStart = value.length - maxLength
+  const newlineStart = value.indexOf("\n", fallbackStart)
+  const start = newlineStart >= 0 && newlineStart < value.length - 1 ? newlineStart + 1 : fallbackStart
+  return value.slice(start)
+}
+
+function appendReplayBuffer(session: Pick<TerminalSession, "replayBuffer" | "cols" | "scrollback">, chunk: string) {
+  session.replayBuffer = trimReplayBuffer(`${session.replayBuffer}${chunk}`, getReplayBufferLimit(session))
 }
 
 function killTerminalProcessTree(subprocess: Bun.Subprocess | null) {
@@ -285,8 +304,7 @@ export class TerminalManager {
       existing.scrollback = clampScrollback(args.scrollback)
       existing.cols = normalizeTerminalDimension(args.cols, existing.cols)
       existing.rows = normalizeTerminalDimension(args.rows, existing.rows)
-      existing.headless.options.scrollback = existing.scrollback
-      existing.headless.resize(existing.cols, existing.rows)
+      existing.replayBuffer = trimReplayBuffer(existing.replayBuffer, getReplayBufferLimit(existing))
       existing.terminal.resize(existing.cols, existing.rows)
       signalActiveTerminalProcess(existing, "SIGWINCH")
       return this.snapshotOf(existing)
@@ -297,9 +315,6 @@ export class TerminalManager {
     const rows = normalizeTerminalDimension(args.rows, DEFAULT_ROWS)
     const scrollback = clampScrollback(args.scrollback)
     const title = path.basename(shell) || "shell"
-    const headless = new Terminal({ cols, rows, scrollback, allowProposedApi: true })
-    const serializeAddon = new SerializeAddon()
-    headless.loadAddon(serializeAddon)
 
     const session: TerminalSession = {
       terminalId: args.terminalId,
@@ -312,6 +327,7 @@ export class TerminalManager {
       status: "running",
       exitCode: null,
       process: null,
+      replayBuffer: "",
       terminal: new Bun.Terminal({
         cols,
         rows,
@@ -319,7 +335,7 @@ export class TerminalManager {
         data: (_terminal, data) => {
           const chunk = Buffer.from(data).toString("utf8")
           updateFocusReportingState(session, chunk)
-          headless.write(chunk)
+          appendReplayBuffer(session, chunk)
           this.emit({
             type: "terminal.output",
             terminalId: args.terminalId,
@@ -327,8 +343,6 @@ export class TerminalManager {
           })
         },
       }),
-      headless,
-      serializeAddon,
       wrappedWithScript: false,
       focusReportingEnabled: false,
       modeSequenceTail: "",
@@ -344,8 +358,6 @@ export class TerminalManager {
       })
     } catch (error) {
       session.terminal.close()
-      session.serializeAddon.dispose()
-      session.headless.dispose()
       throw error
     }
     void session.process.exited.then((exitCode) => {
@@ -363,6 +375,7 @@ export class TerminalManager {
       if (!active) return
       active.status = "exited"
       active.exitCode = 1
+      appendReplayBuffer(active, `\r\n[terminal error] ${error instanceof Error ? error.message : String(error)}\r\n`)
       this.emit({
         type: "terminal.output",
         terminalId: args.terminalId,
@@ -429,7 +442,6 @@ export class TerminalManager {
     if (!session) return
     session.cols = normalizeTerminalDimension(cols, session.cols)
     session.rows = normalizeTerminalDimension(rows, session.rows)
-    session.headless.resize(session.cols, session.rows)
     session.terminal.resize(session.cols, session.rows)
     signalActiveTerminalProcess(session, "SIGWINCH")
   }
@@ -441,8 +453,6 @@ export class TerminalManager {
     this.sessions.delete(terminalId)
     killTerminalProcessTree(session.process)
     session.terminal.close()
-    session.serializeAddon.dispose()
-    session.headless.dispose()
   }
 
   closeByCwd(cwd: string) {
@@ -467,7 +477,7 @@ export class TerminalManager {
       cols: session.cols,
       rows: session.rows,
       scrollback: session.scrollback,
-      serializedState: session.serializeAddon.serialize({ scrollback: session.scrollback }),
+      replayBuffer: session.replayBuffer,
       status: session.status,
       exitCode: session.exitCode,
     }

@@ -25,6 +25,7 @@ interface KannaSidebarProps {
   onCreateChat: (projectId: string) => void
   onDeleteChat: (chat: SidebarChatRow) => void
   onRemoveProject: (projectId: string) => void
+  updatesEnabled: boolean
   updateSnapshot: UpdateSnapshot | null
   onInstallUpdate: () => void
 }
@@ -44,6 +45,7 @@ export function KannaSidebar({
   onCreateChat,
   onDeleteChat,
   onRemoveProject,
+  updatesEnabled,
   updateSnapshot,
   onInstallUpdate,
 }: KannaSidebarProps) {
@@ -158,7 +160,7 @@ export function KannaSidebar({
   const isConnecting = connectionStatus === "connecting" || !ready
   const statusLabel = isConnecting ? "Connecting" : connectionStatus === "connected" ? "Connected" : "Disconnected"
   const statusDotClass = connectionStatus === "connected" ? "bg-emerald-500" : "bg-amber-500"
-  const showUpdateButton = updateSnapshot?.updateAvailable === true
+  const showUpdateButton = updatesEnabled && updateSnapshot?.updateAvailable === true
   const showDevBadge = updateSnapshot
     ? updateSnapshot.latestVersion === `${updateSnapshot.currentVersion}-dev`
     : false

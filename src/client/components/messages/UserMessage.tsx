@@ -2,6 +2,7 @@ import { useState } from "react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { ImageAttachment } from "../../../shared/types"
+import { resolveServerUrl } from "../../lib/runtime"
 import { cn } from "../../lib/utils"
 import { createMarkdownComponents } from "./shared"
 import { ImageLightbox } from "./ImageLightbox"
@@ -49,7 +50,7 @@ export function UserMessage({ content, attachments = [] }: Props) {
                   onClick={() => setActiveImageIndex(index)}
                 >
                   <img
-                    src={attachment.url}
+                    src={resolveServerUrl(attachment.url)}
                     alt={attachment.fileName}
                     loading="lazy"
                     className={cn(

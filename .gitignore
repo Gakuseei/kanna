@@ -4,6 +4,9 @@ package-lock.json
 
 # build output
 dist/
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/
 
 # environment / secrets
 .env

@@ -54,6 +54,7 @@ function KannaLayout() {
         onRemoveProject={(projectId) => {
           void state.handleRemoveProject(projectId)
         }}
+        updatesEnabled={state.updatesEnabled}
         updateSnapshot={state.updateSnapshot}
         onInstallUpdate={() => {
           void state.handleInstallUpdate()

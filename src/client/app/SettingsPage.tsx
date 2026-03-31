@@ -126,7 +126,11 @@ export function getKeybindingsSubtitle(filePathDisplay: string) {
   return `Edit global app shortcuts stored in ${filePathDisplay}.`
 }
 
-export function getGeneralHeaderAction(updateSnapshot: UpdateSnapshot | null) {
+export function getGeneralHeaderAction(updateSnapshot: UpdateSnapshot | null, updatesEnabled = true) {
+  if (!updatesEnabled) {
+    return null
+  }
+
   const isChecking = updateSnapshot?.status === "checking"
   const isUpdating = updateSnapshot?.status === "updating" || updateSnapshot?.status === "restart_pending"
 
@@ -399,7 +403,7 @@ export function SettingsPage() {
   const [keybindingDrafts, setKeybindingDrafts] = useState<Record<string, string>>({})
   const [keybindingsError, setKeybindingsError] = useState<string | null>(null)
   const updateSnapshot = state.updateSnapshot
-  const generalHeaderAction = getGeneralHeaderAction(updateSnapshot)
+  const generalHeaderAction = getGeneralHeaderAction(updateSnapshot, state.updatesEnabled)
   const updateStatusLabel = updateSnapshot?.status === "checking"
     ? "Checking for updates…"
     : updateSnapshot?.status === "updating"
@@ -610,7 +614,7 @@ export function SettingsPage() {
                         Open in {state.editorLabel}
                       </SettingsHeaderButton>
                     ) : null}
-                    {selectedPage === "general" ? (
+                    {selectedPage === "general" && generalHeaderAction ? (
                       <div className="flex items-center gap-2">
                         <SettingsHeaderButton
                           variant={generalHeaderAction.variant}
@@ -645,7 +649,7 @@ export function SettingsPage() {
                         title="Application Update"
                         description={(
                           <>
-                            <span>{updateStatusLabel}.</span>
+                            <span>{state.updatesEnabled ? updateStatusLabel : "Desktop updates are disabled in this build"}.</span>
                             {updateSnapshot?.lastCheckedAt ? (
                               <span> Last checked {new Intl.DateTimeFormat(undefined, {
                                 month: "short",

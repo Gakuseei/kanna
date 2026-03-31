@@ -1,3 +1,4 @@
+import fs from "node:fs"
 import path from "node:path"
 import { APP_NAME, getRuntimeProfile } from "../shared/branding"
 import { EventStore } from "./event-store"
@@ -69,7 +70,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     updateManager,
   })
 
-  const distDir = path.join(import.meta.dir, "..", "..", "dist", "client")
+  const distDir = resolveClientDistDir()
 
   const MAX_PORT_ATTEMPTS = 20
   let actualPort = port
@@ -174,6 +175,46 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     updateManager,
     stop: shutdown,
   }
+}
+
+function isClientDistDir(candidate: string) {
+  return fs.existsSync(path.join(candidate, "index.html"))
+}
+
+function findClientDistDirFrom(startDir: string) {
+  let currentDir = path.resolve(startDir)
+
+  while (true) {
+    const candidate = path.join(currentDir, "dist", "client")
+    if (isClientDistDir(candidate)) {
+      return candidate
+    }
+
+    const parentDir = path.dirname(currentDir)
+    if (parentDir === currentDir) {
+      return null
+    }
+    currentDir = parentDir
+  }
+}
+
+function resolveClientDistDir() {
+  const envDistDir = process.env.KANNA_DESKTOP_DIST_DIR
+  if (envDistDir && isClientDistDir(envDistDir)) {
+    return envDistDir
+  }
+
+  const cwdDistDir = path.join(process.cwd(), "dist", "client")
+  if (isClientDistDir(cwdDistDir)) {
+    return cwdDistDir
+  }
+
+  const execDistDir = findClientDistDirFrom(path.dirname(process.execPath))
+  if (execDistDir) {
+    return execDistDir
+  }
+
+  return path.join(import.meta.dir, "..", "..", "dist", "client")
 }
 
 async function serveStatic(distDir: string, pathname: string) {

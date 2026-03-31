@@ -10,6 +10,7 @@ import type { ChatSnapshot, LocalProjectsSnapshot, SidebarChatRow, SidebarData }
 import type { AskUserQuestionItem } from "../components/messages/types"
 import { useAppDialog } from "../components/ui/app-dialog"
 import { processTranscriptMessages } from "../lib/parseTranscript"
+import { isTauriDesktopWindow, getDesktopServerOrigin } from "../lib/runtime"
 import { canCancelStatus, getLatestToolIds, isProcessingStatus } from "./derived"
 import { KannaSocket, type SocketStatus } from "./socket"
 
@@ -21,8 +22,10 @@ export function getNewestRemainingChatId(projectGroups: SidebarData["projectGrou
 }
 
 function wsUrl() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${protocol}//${window.location.host}/ws`
+  const serverOrigin = getDesktopServerOrigin() ?? window.location.origin
+  const url = new URL("/ws", serverOrigin)
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  return url.toString()
 }
 
 function useKannaSocket() {
@@ -133,6 +136,7 @@ export interface KannaState {
   sidebarData: SidebarData
   localProjects: LocalProjectsSnapshot | null
   updateSnapshot: UpdateSnapshot | null
+  updatesEnabled: boolean
   chatSnapshot: ChatSnapshot | null
   keybindings: KeybindingsSnapshot | null
   connectionStatus: SocketStatus
@@ -191,6 +195,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const navigate = useNavigate()
   const socket = useKannaSocket()
   const dialog = useAppDialog()
+  const updatesEnabled = !isTauriDesktopWindow()
 
   const [sidebarData, setSidebarData] = useState<SidebarData>({ projectGroups: [] })
   const [localProjects, setLocalProjects] = useState<LocalProjectsSnapshot | null>(null)
@@ -240,11 +245,12 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [socket])
 
   useEffect(() => {
+    if (!updatesEnabled) return
     if (connectionStatus !== "connected") return
     void socket.command<UpdateSnapshot>({ type: "update.check", force: true }).catch((error) => {
       setCommandError(error instanceof Error ? error.message : String(error))
     })
-  }, [connectionStatus, socket])
+  }, [connectionStatus, socket, updatesEnabled])
 
   useEffect(() => {
     const phase = getUiUpdateRestartPhase()
@@ -261,6 +267,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [connectionStatus, navigate])
 
   useEffect(() => {
+    if (!updatesEnabled) return
     function handleWindowFocus() {
       if (!updateSnapshot?.lastCheckedAt) return
       if (Date.now() - updateSnapshot.lastCheckedAt <= 60 * 60 * 1000) return
@@ -273,7 +280,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     return () => {
       window.removeEventListener("focus", handleWindowFocus)
     }
-  }, [socket, updateSnapshot?.lastCheckedAt])
+  }, [socket, updateSnapshot?.lastCheckedAt, updatesEnabled])
 
   useEffect(() => {
     return socket.subscribe<KeybindingsSnapshot>({ type: "keybindings" }, (snapshot) => {
@@ -467,6 +474,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }
 
   async function handleCheckForUpdates(options?: { force?: boolean }) {
+    if (!updatesEnabled) {
+      return
+    }
     try {
       await socket.command<UpdateSnapshot>({ type: "update.check", force: options?.force })
       setCommandError(null)
@@ -476,6 +486,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }
 
   async function handleInstallUpdate() {
+    if (!updatesEnabled) {
+      return
+    }
     try {
       const result = await socket.command<UpdateInstallResult>({ type: "update.install" })
       if (!result.ok) {
@@ -721,6 +734,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     sidebarData,
     localProjects,
     updateSnapshot,
+    updatesEnabled,
     chatSnapshot,
     keybindings,
     connectionStatus,

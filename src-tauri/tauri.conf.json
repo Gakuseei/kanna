@@ -1,0 +1,31 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Kanna",
+  "version": "0.13.9",
+  "identifier": "dev.gakusei.kanna",
+  "build": {
+    "beforeDevCommand": "bun run desktop:dev:services",
+    "beforeBuildCommand": "bun run desktop:build:prep",
+    "devUrl": "http://127.0.0.1:5174",
+    "frontendDist": "../dist/client"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "../dist/client/"
+    ],
+    "externalBin": [
+      "binaries/kanna-sidecar"
+    ],
+    "icon": [
+      "../assets/icon.png"
+    ]
+  }
+}

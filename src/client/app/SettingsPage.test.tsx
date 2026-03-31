@@ -139,6 +139,10 @@ describe("getKeybindingsSubtitle", () => {
 })
 
 describe("getGeneralHeaderAction", () => {
+  test("returns null when desktop updates are disabled", () => {
+    expect(getGeneralHeaderAction(null, false)).toBeNull()
+  })
+
   test("returns the check action when no update is available", () => {
     expect(getGeneralHeaderAction(null)).toEqual({
       disabled: false,
@@ -179,7 +183,7 @@ describe("getGeneralHeaderAction", () => {
     })).toEqual({
       disabled: false,
       kind: "update",
-      label: "Update now",
+      label: "Update",
       variant: "default",
     })
   })
@@ -196,7 +200,7 @@ describe("getGeneralHeaderAction", () => {
     })).toEqual({
       disabled: true,
       kind: "update",
-      label: "Update now",
+      label: "Update",
       variant: "default",
     })
   })
