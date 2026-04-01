@@ -7,6 +7,7 @@ import { discoverProjects, type DiscoveredProject } from "./discovery"
 import { KeybindingsManager } from "./keybindings"
 import { MediaStore } from "./media-store"
 import { getMachineDisplayName } from "./machine-name"
+import { HermesSshSettingsManager } from "./hermes-ssh-settings"
 import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
 import type { UpdateInstallAttemptResult } from "./cli-runtime"
@@ -43,7 +44,9 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   let router: ReturnType<typeof createWsRouter>
   const terminals = new TerminalManager()
   const keybindings = new KeybindingsManager()
+  const hermesSshSettings = new HermesSshSettingsManager(store.dataDir)
   await keybindings.initialize()
+  await hermesSshSettings.initialize()
   const updateManager = options.update
     ? new UpdateManager({
       currentVersion: options.update.version,
@@ -55,6 +58,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   const agent = new AgentCoordinator({
     store,
     mediaStore,
+    hermesSshSettings,
     onStateChange: () => {
       router.broadcastSnapshots()
     },
@@ -64,6 +68,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     agent,
     terminals,
     keybindings,
+    hermesSshSettings,
     refreshDiscovery,
     getDiscoveredProjects: () => discoveredProjects,
     machineDisplayName,

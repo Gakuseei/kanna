@@ -13,7 +13,7 @@ import {
   Terminal,
 } from "lucide-react"
 import { APP_NAME, getCliInvocation, SDK_CLIENT_APP } from "../../shared/branding"
-import type { LocalProjectsSnapshot } from "../../shared/types"
+import type { HermesSshSettings, LocalProjectsSnapshot } from "../../shared/types"
 import type { SocketStatus } from "../app/socket"
 import { PageHeader } from "../app/PageHeader"
 import { getPathBasename } from "../lib/formatters"
@@ -29,7 +29,12 @@ interface LocalDevProps {
   startingLocalPath: string | null
   commandError: string | null
   onOpenProject: (localPath: string) => Promise<void>
-  onCreateProject: (project: { mode: "new" | "existing"; localPath: string; title: string }) => Promise<void>
+  onCreateProject: (project: {
+    mode: "new" | "existing" | "ssh"
+    localPath: string
+    title: string
+    hermesSshSettings?: HermesSshSettings
+  }) => Promise<void>
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -305,8 +310,8 @@ export function LocalDev({
       <NewProjectModal
         open={newProjectOpen}
         onOpenChange={setNewProjectOpen}
-        onConfirm={(project) => {
-          void onCreateProject(project)
+        onConfirm={async (project) => {
+          await onCreateProject(project)
         }}
       />
 

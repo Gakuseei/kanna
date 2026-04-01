@@ -3,11 +3,13 @@ import { persist } from "zustand/middleware"
 import {
   DEFAULT_CLAUDE_MODEL_OPTIONS,
   DEFAULT_CODEX_MODEL_OPTIONS,
+  DEFAULT_HERMES_MODEL_OPTIONS,
   isClaudeReasoningEffort,
   isCodexReasoningEffort,
   type AgentProvider,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type HermesModelOptions,
   type ProviderModelOptionsByProvider,
 } from "../../shared/types"
 
@@ -22,6 +24,7 @@ export type DefaultProviderPreference = "last_used" | AgentProvider
 export type ChatProviderPreferences = {
   claude: ProviderPreference<ClaudeModelOptions>
   codex: ProviderPreference<CodexModelOptions>
+  hermes: ProviderPreference<HermesModelOptions>
 }
 
 export type ComposerState =
@@ -35,6 +38,12 @@ export type ComposerState =
     provider: "codex"
     model: string
     modelOptions: CodexModelOptions
+    planMode: boolean
+  }
+  | {
+    provider: "hermes"
+    model: string
+    modelOptions: HermesModelOptions
     planMode: boolean
   }
 
@@ -51,7 +60,7 @@ function normalizeCodexModel(model?: string) {
 }
 
 function normalizeDefaultProvider(value?: string): DefaultProviderPreference {
-  if (value === "claude" || value === "codex") return value
+  if (value === "claude" || value === "codex" || value === "hermes") return value
   return "last_used"
 }
 
@@ -101,6 +110,18 @@ function normalizeCodexPreference(value?: {
   }
 }
 
+function normalizeHermesPreference(value?: {
+  model?: string
+  modelOptions?: Partial<HermesModelOptions>
+  planMode?: boolean
+}): ProviderPreference<HermesModelOptions> {
+  return {
+    model: value?.model ?? "default",
+    modelOptions: { ...DEFAULT_HERMES_MODEL_OPTIONS, ...value?.modelOptions },
+    planMode: false,
+  }
+}
+
 function createDefaultProviderDefaults(): ChatProviderPreferences {
   return {
     claude: {
@@ -111,6 +132,11 @@ function createDefaultProviderDefaults(): ChatProviderPreferences {
     codex: {
       model: "gpt-5.4",
       modelOptions: { ...DEFAULT_CODEX_MODEL_OPTIONS },
+      planMode: false,
+    },
+    hermes: {
+      model: "default",
+      modelOptions: { ...DEFAULT_HERMES_MODEL_OPTIONS },
       planMode: false,
     },
   }
@@ -129,10 +155,16 @@ function normalizeProviderDefaults(value?: {
     modelOptions?: Partial<CodexModelOptions>
     planMode?: boolean
   }
+  hermes?: {
+    model?: string
+    modelOptions?: Partial<HermesModelOptions>
+    planMode?: boolean
+  }
 }): ChatProviderPreferences {
   return {
     claude: normalizeClaudePreference(value?.claude),
     codex: normalizeCodexPreference(value?.codex),
+    hermes: normalizeHermesPreference(value?.hermes),
   }
 }
 
@@ -156,6 +188,16 @@ function composerFromProviderDefaults(
       model: preference.model,
       modelOptions: { ...preference.modelOptions },
       planMode: preference.planMode,
+    }
+  }
+
+  if (provider === "hermes") {
+    const preference = providerDefaults.hermes
+    return {
+      provider: "hermes",
+      model: preference.model,
+      modelOptions: { ...preference.modelOptions },
+      planMode: false,
     }
   }
 
@@ -194,6 +236,16 @@ function normalizeComposerState(
     }
   }
 
+  if (value?.provider === "hermes") {
+    const preference = normalizeHermesPreference(value)
+    return {
+      provider: "hermes",
+      model: preference.model,
+      modelOptions: preference.modelOptions,
+      planMode: false,
+    }
+  }
+
   if (legacyLiveProvider === "claude") {
     const preference = normalizeClaudePreference(legacyLivePreferences?.claude)
     return {
@@ -214,6 +266,16 @@ function normalizeComposerState(
     }
   }
 
+  if (legacyLiveProvider === "hermes") {
+    const preference = normalizeHermesPreference(legacyLivePreferences?.hermes)
+    return {
+      provider: "hermes",
+      model: preference.model,
+      modelOptions: preference.modelOptions,
+      planMode: false,
+    }
+  }
+
   return composerFromProviderDefaults("claude", providerDefaults)
 }
 
@@ -230,7 +292,7 @@ interface ChatPreferencesState {
   setProviderDefaultPlanMode: (provider: AgentProvider, planMode: boolean) => void
   setComposerProvider: (provider: AgentProvider) => void
   setComposerModel: (model: string) => void
-  setComposerModelOptions: (modelOptions: Partial<ClaudeModelOptions> | Partial<CodexModelOptions>) => void
+  setComposerModelOptions: (modelOptions: Partial<ClaudeModelOptions> | Partial<CodexModelOptions> | Partial<HermesModelOptions>) => void
   setComposerPlanMode: (planMode: boolean) => void
   resetComposerFromProvider: (provider: AgentProvider) => void
   initializeComposerForNewChat: () => void
@@ -274,10 +336,15 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
                 ...state.providerDefaults.claude,
                 model,
               })
-              : normalizeCodexPreference({
-                ...state.providerDefaults.codex,
-                model,
-              }),
+              : provider === "codex"
+                ? normalizeCodexPreference({
+                  ...state.providerDefaults.codex,
+                  model,
+                })
+                : normalizeHermesPreference({
+                  ...state.providerDefaults.hermes,
+                  model,
+                }),
           },
         })),
       setProviderDefaultModelOptions: (provider, modelOptions) =>
@@ -292,13 +359,21 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
                   ...modelOptions as Partial<ClaudeModelOptions>,
                 },
               })
-              : normalizeCodexPreference({
-                ...state.providerDefaults.codex,
-                modelOptions: {
-                  ...state.providerDefaults.codex.modelOptions,
-                  ...modelOptions as Partial<CodexModelOptions>,
-                },
-              }),
+              : provider === "codex"
+                ? normalizeCodexPreference({
+                  ...state.providerDefaults.codex,
+                  modelOptions: {
+                    ...state.providerDefaults.codex.modelOptions,
+                    ...modelOptions as Partial<CodexModelOptions>,
+                  },
+                })
+                : normalizeHermesPreference({
+                  ...state.providerDefaults.hermes,
+                  modelOptions: {
+                    ...state.providerDefaults.hermes.modelOptions,
+                    ...modelOptions as Partial<HermesModelOptions>,
+                  },
+                }),
           },
         })),
       setProviderDefaultPlanMode: (provider, planMode) =>
@@ -332,17 +407,29 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
                 planMode: state.composerState.planMode,
               } as ComposerState,
             }
-            : {
-              composerState: {
-                provider: "codex",
-                model,
-                modelOptions: normalizeCodexPreference({
-                  ...state.composerState,
+            : state.composerState.provider === "codex"
+              ? {
+                composerState: {
+                  provider: "codex",
                   model,
-                }).modelOptions,
-                planMode: state.composerState.planMode,
-              } as ComposerState,
-            }
+                  modelOptions: normalizeCodexPreference({
+                    ...state.composerState,
+                    model,
+                  }).modelOptions,
+                  planMode: state.composerState.planMode,
+                } as ComposerState,
+              }
+              : {
+                composerState: {
+                  provider: "hermes",
+                  model,
+                  modelOptions: normalizeHermesPreference({
+                    ...state.composerState,
+                    model,
+                  }).modelOptions,
+                  planMode: false,
+                } as ComposerState,
+              }
         )),
       setComposerModelOptions: (modelOptions) =>
         set((state) => (
@@ -361,20 +448,35 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
                 planMode: state.composerState.planMode,
               } as ComposerState,
             }
-            : {
-              composerState: {
-                provider: "codex",
-                model: state.composerState.model,
-                modelOptions: normalizeCodexPreference({
-                  ...state.composerState,
-                  modelOptions: {
-                    ...state.composerState.modelOptions,
-                    ...modelOptions as Partial<CodexModelOptions>,
-                  },
-                }).modelOptions,
-                planMode: state.composerState.planMode,
-              } as ComposerState,
-            }
+            : state.composerState.provider === "codex"
+              ? {
+                composerState: {
+                  provider: "codex",
+                  model: state.composerState.model,
+                  modelOptions: normalizeCodexPreference({
+                    ...state.composerState,
+                    modelOptions: {
+                      ...state.composerState.modelOptions,
+                      ...modelOptions as Partial<CodexModelOptions>,
+                    },
+                  }).modelOptions,
+                  planMode: state.composerState.planMode,
+                } as ComposerState,
+              }
+              : {
+                composerState: {
+                  provider: "hermes",
+                  model: state.composerState.model,
+                  modelOptions: normalizeHermesPreference({
+                    ...state.composerState,
+                    modelOptions: {
+                      ...state.composerState.modelOptions,
+                      ...modelOptions as Partial<HermesModelOptions>,
+                    },
+                  }).modelOptions,
+                  planMode: false,
+                } as ComposerState,
+              }
         )),
       setComposerPlanMode: (planMode) =>
         set((state) => ({

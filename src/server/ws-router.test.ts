@@ -37,6 +37,22 @@ const DEFAULT_UPDATE_SNAPSHOT: UpdateSnapshot = {
   installAction: "restart",
 }
 
+const HERMES_SSH_SETTINGS_STUB = {
+  getSettings: () => ({
+    host: "",
+    port: 22,
+    user: "",
+    keyPath: "",
+    remoteCwd: "~",
+    hermesCommand: "hermes acp",
+  }),
+  write: async (settings: unknown) => settings,
+  validate: async () => ({
+    ok: false,
+    message: "Hermes SSH is not configured.",
+  }),
+}
+
 describe("ws-router", () => {
   test("acks system.ping without broadcasting snapshots", () => {
     const router = createWsRouter({
@@ -50,6 +66,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      hermesSshSettings: HERMES_SSH_SETTINGS_STUB as never,
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -90,6 +107,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      hermesSshSettings: HERMES_SSH_SETTINGS_STUB as never,
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -121,6 +139,46 @@ describe("ws-router", () => {
     ])
   })
 
+  test("returns an error for unknown commands instead of hanging", () => {
+    const router = createWsRouter({
+      store: { state: createEmptyState() } as never,
+      agent: { getActiveStatuses: () => new Map() } as never,
+      terminals: {
+        getSnapshot: () => null,
+        onEvent: () => () => {},
+      } as never,
+      keybindings: {
+        getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
+        onChange: () => () => {},
+      } as never,
+      hermesSshSettings: HERMES_SSH_SETTINGS_STUB as never,
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+    })
+    const ws = new FakeWebSocket()
+
+    router.handleMessage(
+      ws as never,
+      JSON.stringify({
+        v: 1,
+        type: "command",
+        id: "unknown-1",
+        command: { type: "settings.writeHermesSshLegacy" },
+      })
+    )
+
+    expect(ws.sent).toEqual([
+      {
+        v: PROTOCOL_VERSION,
+        type: "error",
+        id: "unknown-1",
+        message: "Unknown command: settings.writeHermesSshLegacy",
+      },
+    ])
+  })
+
   test("subscribes and unsubscribes chat topics", () => {
     const router = createWsRouter({
       store: { state: createEmptyState() } as never,
@@ -133,6 +191,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      hermesSshSettings: HERMES_SSH_SETTINGS_STUB as never,
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -198,6 +257,7 @@ describe("ws-router", () => {
         onEvent: () => () => {},
       } as never,
       keybindings: keybindings as never,
+      hermesSshSettings: HERMES_SSH_SETTINGS_STUB as never,
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -302,6 +362,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      hermesSshSettings: HERMES_SSH_SETTINGS_STUB as never,
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",

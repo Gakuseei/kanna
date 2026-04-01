@@ -6,6 +6,7 @@ import type { AgentCoordinator } from "./agent"
 import type { DiscoveredProject } from "./discovery"
 import { EventStore } from "./event-store"
 import { openExternal } from "./external-open"
+import { HermesSshSettingsManager } from "./hermes-ssh-settings"
 import { KeybindingsManager } from "./keybindings"
 import { ensureProjectDirectory } from "./paths"
 import { listInstalledSkills } from "./skills"
@@ -22,6 +23,7 @@ interface CreateWsRouterArgs {
   agent: AgentCoordinator
   terminals: TerminalManager
   keybindings: KeybindingsManager
+  hermesSshSettings: HermesSshSettingsManager
   refreshDiscovery: () => Promise<DiscoveredProject[]>
   getDiscoveredProjects: () => DiscoveredProject[]
   machineDisplayName: string
@@ -37,6 +39,7 @@ export function createWsRouter({
   agent,
   terminals,
   keybindings,
+  hermesSshSettings,
   refreshDiscovery,
   getDiscoveredProjects,
   machineDisplayName,
@@ -233,19 +236,39 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
           return
         }
+        case "settings.readHermesSsh": {
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: hermesSshSettings.getSettings() })
+          return
+        }
+        case "settings.writeHermesSsh": {
+          const snapshot = await hermesSshSettings.write(command.settings)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          return
+        }
+        case "settings.validateHermesSsh": {
+          const result = await hermesSshSettings.validate(command.settings)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
+          return
+        }
         case "project.open": {
           await ensureProjectDirectory(command.localPath)
           const project = await store.openProject(command.localPath)
-          await refreshDiscovery()
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id } })
-          break
+          broadcastSnapshots()
+          void refreshDiscovery().then(() => {
+            broadcastSnapshots()
+          })
+          return
         }
         case "project.create": {
           await ensureProjectDirectory(command.localPath)
           const project = await store.openProject(command.localPath, command.title)
-          await refreshDiscovery()
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id } })
-          break
+          broadcastSnapshots()
+          void refreshDiscovery().then(() => {
+            broadcastSnapshots()
+          })
+          return
         }
         case "project.remove": {
           const project = store.getProject(command.projectId)
@@ -324,6 +347,15 @@ export function createWsRouter({
           terminals.close(command.terminalId)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           pushTerminalSnapshot(command.terminalId)
+          return
+        }
+        default: {
+          send(ws, {
+            v: PROTOCOL_VERSION,
+            type: "error",
+            id,
+            message: `Unknown command: ${(command as { type: string }).type}`,
+          })
           return
         }
       }

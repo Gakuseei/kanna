@@ -22,6 +22,11 @@ describe("migrateChatPreferencesState", () => {
           modelOptions: { reasoningEffort: "minimal", fastMode: true },
           planMode: false,
         },
+        hermes: {
+          model: "default",
+          modelOptions: {},
+          planMode: false,
+        },
       },
       composerState: {
         provider: "claude",
@@ -42,6 +47,11 @@ describe("migrateChatPreferencesState", () => {
         codex: {
           model: "gpt-5.3-codex",
           modelOptions: { reasoningEffort: "minimal", fastMode: true },
+          planMode: false,
+        },
+        hermes: {
+          model: "default",
+          modelOptions: {},
           planMode: false,
         },
       },

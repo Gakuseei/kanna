@@ -1,7 +1,7 @@
 export const STORE_VERSION = 2 as const
 export const PROTOCOL_VERSION = 1 as const
 
-export type AgentProvider = "claude" | "codex"
+export type AgentProvider = "claude" | "codex" | "hermes"
 
 export interface ProviderModelOption {
   id: string
@@ -42,9 +42,12 @@ export interface CodexModelOptions {
   fastMode: boolean
 }
 
+export interface HermesModelOptions {}
+
 export interface ProviderModelOptionsByProvider {
   claude: ClaudeModelOptions
   codex: CodexModelOptions
+  hermes: HermesModelOptions
 }
 
 export type ModelOptions = Partial<{
@@ -59,6 +62,8 @@ export const DEFAULT_CODEX_MODEL_OPTIONS = {
   reasoningEffort: "high",
   fastMode: false,
 } as const satisfies CodexModelOptions
+
+export const DEFAULT_HERMES_MODEL_OPTIONS = {} as const satisfies HermesModelOptions
 
 export function isClaudeReasoningEffort(value: unknown): value is ClaudeReasoningEffort {
   return CLAUDE_REASONING_OPTIONS.some((option) => option.id === value)
@@ -98,9 +103,19 @@ export const PROVIDERS: ProviderCatalogEntry[] = [
     defaultModel: "gpt-5.4",
     supportsPlanMode: true,
     models: [
-      { id: "gpt-5.4", label: "GPT-5.4", supportsEffort: false },
-      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsEffort: false },
-      { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", supportsEffort: false },
+      { id: "gpt-5.4", label: "GPT-5.4", supportsEffort: true },
+      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsEffort: true },
+      { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", supportsEffort: true },
+    ],
+    efforts: [...CODEX_REASONING_OPTIONS],
+  },
+  {
+    id: "hermes",
+    label: "Hermes",
+    defaultModel: "default",
+    supportsPlanMode: false,
+    models: [
+      { id: "default", label: "Configured Default", supportsEffort: false },
     ],
     efforts: [],
   },
@@ -239,6 +254,20 @@ export interface AccountInfo {
   subscriptionType?: string
   tokenSource?: string
   apiKeySource?: string
+}
+
+export interface HermesSshSettings {
+  host: string
+  port: number
+  user: string
+  keyPath: string
+  remoteCwd: string
+  hermesCommand: string
+}
+
+export interface HermesSshValidationResult {
+  ok: boolean
+  message: string
 }
 
 export interface ImageAttachment {

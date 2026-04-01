@@ -13,12 +13,15 @@ import { EventStore } from "./event-store"
 import { CodexAppServerManager } from "./codex-app-server"
 import { generateTitleForChat } from "./generate-title"
 import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
+import { HermesSshSettingsManager } from "./hermes-ssh-settings"
+import { HermesSshManager } from "./hermes-ssh-manager"
 import { MediaStore } from "./media-store"
 import {
   codexServiceTierFromModelOptions,
   getServerProviderCatalog,
   normalizeClaudeModelOptions,
   normalizeCodexModelOptions,
+  normalizeHermesModelOptions,
   normalizeServerModel,
 } from "./provider-catalog"
 
@@ -68,6 +71,8 @@ interface AgentCoordinatorArgs {
   mediaStore?: MediaStore
   onStateChange: () => void
   codexManager?: CodexAppServerManager
+  hermesManager?: HermesSshManager
+  hermesSshSettings?: HermesSshSettingsManager
   generateTitle?: (messageContent: string, cwd: string) => Promise<string | null>
 }
 
@@ -351,6 +356,8 @@ export class AgentCoordinator {
   private readonly mediaStore: MediaStore | null
   private readonly onStateChange: () => void
   private readonly codexManager: CodexAppServerManager
+  private readonly hermesManager: HermesSshManager
+  private readonly hermesSshSettings: HermesSshSettingsManager | null
   private readonly generateTitle: (messageContent: string, cwd: string) => Promise<string | null>
   readonly activeTurns = new Map<string, ActiveTurn>()
 
@@ -359,6 +366,8 @@ export class AgentCoordinator {
     this.mediaStore = args.mediaStore ?? null
     this.onStateChange = args.onStateChange
     this.codexManager = args.codexManager ?? new CodexAppServerManager()
+    this.hermesManager = args.hermesManager ?? new HermesSshManager()
+    this.hermesSshSettings = args.hermesSshSettings ?? null
     this.generateTitle = args.generateTitle ?? generateTitleForChat
   }
 
@@ -390,6 +399,16 @@ export class AgentCoordinator {
         effort: modelOptions.reasoningEffort,
         serviceTier: undefined,
         planMode: catalog.supportsPlanMode ? Boolean(command.planMode) : false,
+      }
+    }
+
+    if (provider === "hermes") {
+      normalizeHermesModelOptions(command.modelOptions)
+      return {
+        model: normalizeServerModel(provider, command.model),
+        effort: undefined,
+        serviceTier: undefined,
+        planMode: false,
       }
     }
 
@@ -474,7 +493,7 @@ export class AgentCoordinator {
         sessionToken: chat.sessionToken,
         onToolRequest,
       })
-    } else {
+    } else if (args.provider === "codex") {
       await this.codexManager.startSession({
         chatId: args.chatId,
         cwd: project.localPath,
@@ -490,6 +509,19 @@ export class AgentCoordinator {
         effort: args.effort as any,
         serviceTier: args.serviceTier,
         planMode: args.planMode,
+        onToolRequest,
+      })
+    } else {
+      const settings = this.requireHermesSettings()
+      await this.hermesManager.startSession({
+        chatId: args.chatId,
+        settings,
+        sessionToken: chat.sessionToken,
+      })
+      turn = await this.hermesManager.startPrompt({
+        chatId: args.chatId,
+        content: args.content,
+        model: args.model,
         onToolRequest,
       })
     }
@@ -539,7 +571,7 @@ export class AgentCoordinator {
     const chat = this.store.requireChat(chatId)
     const provider = this.resolveProvider(command, chat.provider)
     const stagedIds = command.attachments?.map((attachment) => attachment.stagedId).filter(Boolean) ?? []
-    if (provider === "claude" && stagedIds.length > 0) {
+    if (provider !== "codex" && stagedIds.length > 0) {
       throw new Error("Image attachments are currently supported only for Codex chats.")
     }
 
@@ -759,5 +791,16 @@ export class AgentCoordinator {
       throw new Error("Media storage is not configured")
     }
     return this.mediaStore
+  }
+
+  private requireHermesSettings() {
+    if (!this.hermesSshSettings) {
+      throw new Error("Hermes SSH settings manager is not configured")
+    }
+    const settings = this.hermesSshSettings.getSettings()
+    if (!settings.host || !settings.user) {
+      throw new Error("Hermes SSH is not configured. Add a host in Settings > Providers.")
+    }
+    return settings
   }
 }

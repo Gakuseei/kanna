@@ -17,7 +17,15 @@ import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useNavigate, useOutletContext, useParams } from "react-router-dom"
 import { getKeybindingsFilePathDisplay, SDK_CLIENT_APP } from "../../shared/branding"
-import { DEFAULT_KEYBINDINGS, PROVIDERS, type AgentProvider, type KeybindingAction, type UpdateSnapshot } from "../../shared/types"
+import {
+  DEFAULT_KEYBINDINGS,
+  PROVIDERS,
+  type AgentProvider,
+  type HermesSshSettings,
+  type HermesSshValidationResult,
+  type KeybindingAction,
+  type UpdateSnapshot,
+} from "../../shared/types"
 import { markdownComponents } from "../components/messages/shared"
 import { ChatPreferenceControls } from "../components/chat-ui/ChatPreferenceControls"
 import { buttonVariants } from "../components/ui/button"
@@ -59,7 +67,7 @@ const sidebarItems = [
     id: "providers",
     label: "Providers",
     icon: MessageSquareQuote,
-    subtitle: "Manage the default chat provider and saved model defaults for Claude Code and Codex.",
+    subtitle: "Manage the default chat provider, saved model defaults, and Hermes SSH access.",
   },
   {
     id: "keybindings",
@@ -395,6 +403,17 @@ export function SettingsPage() {
   const setProviderDefaultModel = useChatPreferencesStore((store) => store.setProviderDefaultModel)
   const setProviderDefaultModelOptions = useChatPreferencesStore((store) => store.setProviderDefaultModelOptions)
   const setProviderDefaultPlanMode = useChatPreferencesStore((store) => store.setProviderDefaultPlanMode)
+  const [hermesSshSettings, setHermesSshSettings] = useState<HermesSshSettings>({
+    host: "",
+    port: 22,
+    user: "",
+    keyPath: "",
+    remoteCwd: "~",
+    hermesCommand: "hermes acp",
+  })
+  const [hermesSshStatus, setHermesSshStatus] = useState<"idle" | "saving" | "validating">("idle")
+  const [hermesSshMessage, setHermesSshMessage] = useState<string | null>(null)
+  const [hermesSshError, setHermesSshError] = useState<string | null>(null)
   const resolvedKeybindings = useMemo(() => getResolvedKeybindings(keybindings), [keybindings])
   const keybindingsFilePathDisplay = resolvedKeybindings.filePathDisplay || getKeybindingsFilePathDisplay()
   const [scrollbackDraft, setScrollbackDraft] = useState(String(scrollbackLines))
@@ -438,6 +457,16 @@ export function SettingsPage() {
       ])
     ))
   }, [resolvedKeybindings])
+
+  useEffect(() => {
+    void state.socket.command<HermesSshSettings>({ type: "settings.readHermesSsh" })
+      .then((settings) => {
+        setHermesSshSettings(settings)
+      })
+      .catch((error) => {
+        setHermesSshError(error instanceof Error ? error.message : "Unable to load Hermes SSH settings.")
+      })
+  }, [state.socket])
 
   useEffect(() => {
     if (!sectionId) return
@@ -547,6 +576,49 @@ export function SettingsPage() {
         setChangelogError(error instanceof Error ? error.message : "Unable to load changelog.")
         setChangelogStatus("error")
       })
+  }
+
+  function updateHermesSshSetting<TKey extends keyof HermesSshSettings>(key: TKey, value: HermesSshSettings[TKey]) {
+    setHermesSshSettings((current) => ({ ...current, [key]: value }))
+  }
+
+  async function saveHermesSshSettings() {
+    try {
+      setHermesSshStatus("saving")
+      setHermesSshError(null)
+      setHermesSshMessage(null)
+      const nextSettings = await state.socket.command<HermesSshSettings>({
+        type: "settings.writeHermesSsh",
+        settings: hermesSshSettings,
+      })
+      setHermesSshSettings(nextSettings)
+      setHermesSshMessage("Hermes SSH settings saved.")
+    } catch (error) {
+      setHermesSshError(error instanceof Error ? error.message : "Unable to save Hermes SSH settings.")
+    } finally {
+      setHermesSshStatus("idle")
+    }
+  }
+
+  async function validateHermesSshSettings() {
+    try {
+      setHermesSshStatus("validating")
+      setHermesSshError(null)
+      setHermesSshMessage(null)
+      const result = await state.socket.command<HermesSshValidationResult>({
+        type: "settings.validateHermesSsh",
+        settings: hermesSshSettings,
+      })
+      if (result.ok) {
+        setHermesSshMessage(result.message)
+      } else {
+        setHermesSshError(result.message)
+      }
+    } catch (error) {
+      setHermesSshError(error instanceof Error ? error.message : "Unable to validate Hermes SSH settings.")
+    } finally {
+      setHermesSshStatus("idle")
+    }
   }
 
   const customEditorPreview = editorCommandDraft
@@ -868,6 +940,110 @@ export function SettingsPage() {
                           includePlanMode
                           className="justify-start flex-wrap"
                         />
+                      </div>
+                    </SettingsRow>
+
+                    <SettingsRow
+                      title="Hermes Defaults"
+                      description="Saved defaults when using Hermes over SSH."
+                      alignStart
+                    >
+                      <div className="max-w-[420px]">
+                        <ChatPreferenceControls
+                          availableProviders={PROVIDERS}
+                          selectedProvider="hermes"
+                          showProviderPicker={false}
+                          providerLocked
+                          model={providerDefaults.hermes.model}
+                          modelOptions={providerDefaults.hermes.modelOptions}
+                          onModelChange={(_, model) => {
+                            setProviderDefaultModel("hermes", model)
+                          }}
+                          onClaudeReasoningEffortChange={() => {}}
+                          onCodexReasoningEffortChange={() => {}}
+                          onCodexFastModeChange={() => {}}
+                          planMode={false}
+                          onPlanModeChange={() => {}}
+                          includePlanMode={false}
+                          className="justify-start flex-wrap"
+                        />
+                      </div>
+                    </SettingsRow>
+
+                    <SettingsRow
+                      title="Hermes SSH Host"
+                      description="Single saved SSH profile used to start remote `hermes acp`."
+                      alignStart
+                    >
+                      <div className="w-full max-w-[420px] space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input
+                            value={hermesSshSettings.host}
+                            onChange={(event) => updateHermesSshSetting("host", event.target.value)}
+                            placeholder="Host"
+                          />
+                          <Input
+                            value={hermesSshSettings.user}
+                            onChange={(event) => updateHermesSshSetting("user", event.target.value)}
+                            placeholder="User"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={String(hermesSshSettings.port)}
+                            onChange={(event) => updateHermesSshSetting("port", Number(event.target.value || 22))}
+                            placeholder="Port"
+                            className="hide-number-steppers"
+                          />
+                          <Input
+                            value={hermesSshSettings.keyPath}
+                            onChange={(event) => updateHermesSshSetting("keyPath", event.target.value)}
+                            placeholder="SSH key path (optional)"
+                          />
+                        </div>
+                        <Input
+                          value={hermesSshSettings.remoteCwd}
+                          onChange={(event) => updateHermesSshSetting("remoteCwd", event.target.value)}
+                          placeholder="Remote cwd"
+                        />
+                        <Input
+                          value={hermesSshSettings.hermesCommand}
+                          onChange={(event) => updateHermesSshSetting("hermesCommand", event.target.value)}
+                          placeholder="Hermes command"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void saveHermesSshSettings()}
+                            disabled={hermesSshStatus !== "idle"}
+                            className={cn(buttonVariants({ variant: "default" }), "h-9 px-3")}
+                          >
+                            {hermesSshStatus === "saving" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void validateHermesSshSettings()}
+                            disabled={hermesSshStatus !== "idle"}
+                            className={cn(buttonVariants({ variant: "outline" }), "h-9 px-3")}
+                          >
+                            {hermesSshStatus === "validating" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Test connection
+                          </button>
+                        </div>
+                        {hermesSshMessage ? (
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+                            {hermesSshMessage}
+                          </div>
+                        ) : null}
+                        {hermesSshError ? (
+                          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                            {hermesSshError}
+                          </div>
+                        ) : null}
                       </div>
                     </SettingsRow>
                   </div>

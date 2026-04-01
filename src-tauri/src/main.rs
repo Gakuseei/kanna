@@ -1,3 +1,3 @@
 fn main() {
-  kanna_desktop_lib::run()
+    kanna_desktop_lib::run()
 }

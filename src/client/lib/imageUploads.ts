@@ -9,6 +9,12 @@ export const ACCEPTED_IMAGE_TYPES = new Set([
 ])
 
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+const ACCEPTED_BROWSER_CLIPBOARD_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const
 
 export interface PendingComposerImage {
   id: string
@@ -134,30 +140,79 @@ function decodeBase64(base64: string) {
   return bytes
 }
 
+function normalizeClipboardImageType(type: string) {
+  return type === "image/jpg" ? "image/jpeg" : type
+}
+
+function isNativeClipboardImagePayload(
+  payload: unknown,
+): payload is { pngBase64: string; width: number; height: number } {
+  if (!payload || typeof payload !== "object") {
+    return false
+  }
+
+  const candidate = payload as Record<string, unknown>
+  return typeof candidate.pngBase64 === "string"
+    && typeof candidate.width === "number"
+    && typeof candidate.height === "number"
+}
+
 export async function readNativeClipboardImageFile() {
   if (!isTauriDesktopWindow()) {
     return null
   }
 
-  try {
-    const { invoke } = await import("@tauri-apps/api/core")
-    const payload = await invoke<{
-      pngBase64: string
-      width: number
-      height: number
-    } | null>("read_clipboard_image")
-    if (!payload) {
-      return null
-    }
+  const { invoke } = await import("@tauri-apps/api/core")
+  const payload = await invoke<unknown>("read_clipboard_image")
+  if (payload === null) {
+    return null
+  }
 
-    const bytes = decodeBase64(payload.pngBase64)
-    return new File([bytes], `clipboard-${Date.now()}.png`, {
-      type: "image/png",
-      lastModified: Date.now(),
-    })
+  if (!isNativeClipboardImagePayload(payload)) {
+    console.error("[imageUploads] Invalid native clipboard image payload", payload)
+    throw new Error("Clipboard image could not be read from the desktop bridge.")
+  }
+
+  const bytes = decodeBase64(payload.pngBase64)
+  return new File([bytes], `clipboard-${Date.now()}.png`, {
+    type: "image/png",
+    lastModified: Date.now(),
+  })
+}
+
+export async function readBrowserClipboardImageFile() {
+  if (typeof navigator === "undefined" || typeof navigator.clipboard?.read !== "function") {
+    return null
+  }
+
+  let items: ClipboardItem[]
+  try {
+    items = await navigator.clipboard.read()
   } catch {
     return null
   }
+
+  for (const item of items) {
+    const matchingType = item.types.find((type) => ACCEPTED_BROWSER_CLIPBOARD_TYPES.includes(
+      normalizeClipboardImageType(type) as (typeof ACCEPTED_BROWSER_CLIPBOARD_TYPES)[number],
+    ))
+
+    if (!matchingType) {
+      continue
+    }
+
+    const blob = await item.getType(matchingType)
+    if (blob.size <= 0) {
+      continue
+    }
+
+    return new File([blob], `clipboard-${Date.now()}.${matchingType.split("/")[1] ?? "png"}`, {
+      type: normalizeClipboardImageType(matchingType),
+      lastModified: Date.now(),
+    })
+  }
+
+  return null
 }
 
 export async function stageImages(files: File[]): Promise<StagedImageUpload[]> {

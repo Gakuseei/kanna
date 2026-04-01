@@ -1,6 +1,8 @@
 import type {
   AgentProvider,
   ChatSnapshot,
+  HermesSshSettings,
+  HermesSshValidationResult,
   KeybindingsSnapshot,
   LocalProjectsSnapshot,
   ModelOptions,
@@ -52,6 +54,9 @@ export type ClientCommand =
   | { type: "skills.list" }
   | { type: "settings.readKeybindings" }
   | { type: "settings.writeKeybindings"; bindings: KeybindingsSnapshot["bindings"] }
+  | { type: "settings.readHermesSsh" }
+  | { type: "settings.writeHermesSsh"; settings: HermesSshSettings }
+  | { type: "settings.validateHermesSsh"; settings?: HermesSshSettings }
   | {
       type: "system.openExternal"
       localPath: string
@@ -98,7 +103,17 @@ export type ServerSnapshot =
 export type ServerEnvelope =
   | { v: 1; type: "snapshot"; id: string; snapshot: ServerSnapshot }
   | { v: 1; type: "event"; id: string; event: TerminalEvent }
-  | { v: 1; type: "ack"; id: string; result?: unknown | SkillCatalogEntry[] }
+  | {
+      v: 1
+      type: "ack"
+      id: string
+      result?:
+        | unknown
+        | SkillCatalogEntry[]
+        | KeybindingsSnapshot
+        | HermesSshSettings
+        | HermesSshValidationResult
+    }
   | { v: 1; type: "error"; id?: string; message: string }
 
 export function isClientEnvelope(value: unknown): value is ClientEnvelope {

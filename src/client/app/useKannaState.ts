@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
+import type { HermesSshSettings } from "../../shared/types"
 import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type KeybindingsSnapshot, type ModelOptions, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
 import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import { useRightSidebarStore } from "../stores/rightSidebarStore"
@@ -89,9 +90,10 @@ function clearUiUpdateRestartPhase() {
 }
 
 export interface ProjectRequest {
-  mode: "new" | "existing"
+  mode: "new" | "existing" | "ssh"
   localPath: string
   title: string
+  hermesSshSettings?: HermesSshSettings
 }
 
 export type StartChatIntent =
@@ -413,8 +415,12 @@ export function useKannaState(activeChatId: string | null): KannaState {
     element.scrollTo({ top: element.scrollHeight, behavior: "smooth" })
   }
 
-  async function createChatForProject(projectId: string) {
-    useChatPreferencesStore.getState().initializeComposerForNewChat()
+  async function createChatForProject(projectId: string, providerOverride?: "hermes") {
+    if (providerOverride === "hermes") {
+      useChatPreferencesStore.getState().resetComposerFromProvider("hermes")
+    } else {
+      useChatPreferencesStore.getState().initializeComposerForNewChat()
+    }
     const result = await socket.command<{ chatId: string }>({ type: "chat.create", projectId })
     setSelectedProjectId(projectId)
     setPendingChatId(result.chatId)
@@ -423,7 +429,11 @@ export function useKannaState(activeChatId: string | null): KannaState {
     setCommandError(null)
   }
 
-  async function resolveProjectIdForStartChat(intent: StartChatIntent): Promise<{ projectId: string; localPath?: string }> {
+  async function resolveProjectIdForStartChat(intent: StartChatIntent): Promise<{
+    projectId: string
+    localPath?: string
+    providerOverride?: "hermes"
+  }> {
     if (intent.kind === "project_id") {
       return { projectId: intent.projectId }
     }
@@ -431,6 +441,26 @@ export function useKannaState(activeChatId: string | null): KannaState {
     if (intent.kind === "local_path") {
       const result = await socket.command<{ projectId: string }>({ type: "project.open", localPath: intent.localPath })
       return { projectId: result.projectId, localPath: intent.localPath }
+    }
+
+    if (intent.project.mode === "ssh") {
+      if (!intent.project.hermesSshSettings) {
+        throw new Error("Hermes SSH settings are missing.")
+      }
+      await socket.command<HermesSshSettings>({
+        type: "settings.writeHermesSsh",
+        settings: intent.project.hermesSshSettings,
+      })
+      const result = await socket.command<{ projectId: string }>({
+        type: "project.create",
+        localPath: intent.project.localPath,
+        title: intent.project.title,
+      })
+      return {
+        projectId: result.projectId,
+        localPath: intent.project.localPath,
+        providerOverride: "hermes",
+      }
     }
 
     const result = await socket.command<{ projectId: string }>(
@@ -452,8 +482,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
         setStartingLocalPath(localPath)
       }
 
-      const { projectId } = await resolveProjectIdForStartChat(intent)
-      await createChatForProject(projectId)
+      const { projectId, providerOverride } = await resolveProjectIdForStartChat(intent)
+      await createChatForProject(projectId, providerOverride)
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     } finally {

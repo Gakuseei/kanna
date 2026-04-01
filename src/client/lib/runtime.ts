@@ -5,6 +5,7 @@ function getDesktopWindow() {
 
   return window as Window & {
     __KANNA_SERVER_ORIGIN__?: unknown
+    isTauri?: unknown
   }
 }
 
@@ -14,7 +15,9 @@ export function isTauriDesktopWindow() {
     return false
   }
 
-  return "__TAURI_INTERNALS__" in currentWindow || "__TAURI__" in currentWindow
+  return Boolean(currentWindow.isTauri)
+    || "__TAURI_INTERNALS__" in currentWindow
+    || "__TAURI__" in currentWindow
 }
 
 export function getDesktopServerOrigin() {

@@ -3,11 +3,13 @@ import { Brain, Gauge, ListTodo, LockOpen, Sparkles, Zap } from "lucide-react"
 import {
   CLAUDE_REASONING_OPTIONS,
   CODEX_REASONING_OPTIONS,
+  PROVIDERS,
   type AgentProvider,
   type ClaudeModelOptions,
   type ClaudeReasoningEffort,
   type CodexModelOptions,
   type CodexReasoningEffort,
+  type HermesModelOptions,
   type ProviderCatalogEntry,
 } from "../../../shared/types"
 import { cn } from "../../lib/utils"
@@ -43,9 +45,24 @@ function OpenAIIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   )
 }
 
+function HermesIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={cn("shrink-0", className)}
+      {...props}
+    >
+      <path d="M6 4v16M18 4v16M10 4v16M14 4v16M6 12h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export const PROVIDER_ICONS: Record<AgentProvider, IconComponent> = {
   claude: AnthropicIcon,
   codex: OpenAIIcon,
+  hermes: HermesIcon,
 }
 
 export const MODEL_ICON_BY_ID: Record<string, typeof Sparkles> = {
@@ -55,6 +72,7 @@ export const MODEL_ICON_BY_ID: Record<string, typeof Sparkles> = {
   "gpt-5.4": Brain,
   "gpt-5.3-codex": Sparkles,
   "gpt-5.3-codex-spark": Zap,
+  default: Brain,
 }
 
 export function PopoverMenuItem({
@@ -144,7 +162,7 @@ interface ChatPreferenceControlsProps {
   showProviderPicker?: boolean
   providerLocked?: boolean
   model: string
-  modelOptions: ClaudeModelOptions | CodexModelOptions
+  modelOptions: ClaudeModelOptions | CodexModelOptions | HermesModelOptions
   onProviderChange?: (provider: AgentProvider) => void
   onModelChange: (provider: AgentProvider, model: string) => void
   onClaudeReasoningEffortChange: (effort: ClaudeReasoningEffort) => void
@@ -173,11 +191,18 @@ export function ChatPreferenceControls({
   includePlanMode = true,
   className,
 }: ChatPreferenceControlsProps) {
-  const providerConfig = availableProviders.find((provider) => provider.id === selectedProvider) ?? availableProviders[0]
+  const fallbackProviderConfig = PROVIDERS.find((provider) => provider.id === selectedProvider) ?? PROVIDERS[0]
+  const runtimeProviderConfig = availableProviders.find((provider) => provider.id === selectedProvider) ?? availableProviders[0]
+  const providerConfig = {
+    ...fallbackProviderConfig,
+    ...runtimeProviderConfig,
+    efforts: runtimeProviderConfig?.efforts.length ? runtimeProviderConfig.efforts : fallbackProviderConfig.efforts,
+  }
   const ProviderIcon = PROVIDER_ICONS[selectedProvider]
   const ModelIcon = MODEL_ICON_BY_ID[model] ?? Sparkles
   const showPlanMode = includePlanMode && providerConfig?.supportsPlanMode && onPlanModeChange
   const codexModelOptions = selectedProvider === "codex" ? modelOptions as CodexModelOptions : null
+  const showEffortControl = providerConfig.efforts.length > 0
 
   return (
     <div className={cn("flex justify-center items-center gap-0.5", className)}>
@@ -234,47 +259,49 @@ export function ChatPreferenceControls({
         })}
       </InputPopover>
 
-      <InputPopover
-        trigger={(
-          <>
-            <Gauge className="h-3.5 w-3.5" />
-            <span>{
-              selectedProvider === "claude"
-                ? CLAUDE_REASONING_OPTIONS.find((effort) => effort.id === modelOptions.reasoningEffort)?.label ?? modelOptions.reasoningEffort
-                : CODEX_REASONING_OPTIONS.find((effort) => effort.id === modelOptions.reasoningEffort)?.label ?? modelOptions.reasoningEffort
-            }</span>
-          </>
-        )}
-      >
-        {(close) => (
-          selectedProvider === "claude"
-            ? CLAUDE_REASONING_OPTIONS.map((effort) => (
-              <PopoverMenuItem
-                key={effort.id}
-                onClick={() => {
-                  onClaudeReasoningEffortChange(effort.id)
-                  close()
-                }}
-                selected={modelOptions.reasoningEffort === effort.id}
-                icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
-                label={effort.label}
-                disabled={effort.id === "max" && model !== "opus"}
-              />
-            ))
-            : CODEX_REASONING_OPTIONS.map((effort) => (
-              <PopoverMenuItem
-                key={effort.id}
-                onClick={() => {
-                  onCodexReasoningEffortChange(effort.id)
-                  close()
-                }}
-                selected={modelOptions.reasoningEffort === effort.id}
-                icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
-                label={effort.label}
-              />
-            ))
-        )}
-      </InputPopover>
+      {showEffortControl ? (
+        <InputPopover
+          trigger={(
+            <>
+              <Gauge className="h-3.5 w-3.5" />
+              <span>{
+                selectedProvider === "claude"
+                  ? CLAUDE_REASONING_OPTIONS.find((effort) => effort.id === (modelOptions as ClaudeModelOptions).reasoningEffort)?.label ?? (modelOptions as ClaudeModelOptions).reasoningEffort
+                  : CODEX_REASONING_OPTIONS.find((effort) => effort.id === (modelOptions as CodexModelOptions).reasoningEffort)?.label ?? (modelOptions as CodexModelOptions).reasoningEffort
+              }</span>
+            </>
+          )}
+        >
+          {(close) => (
+            selectedProvider === "claude"
+              ? CLAUDE_REASONING_OPTIONS.map((effort) => (
+                <PopoverMenuItem
+                  key={effort.id}
+                  onClick={() => {
+                    onClaudeReasoningEffortChange(effort.id)
+                    close()
+                  }}
+                  selected={(modelOptions as ClaudeModelOptions).reasoningEffort === effort.id}
+                  icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
+                  label={effort.label}
+                  disabled={effort.id === "max" && model !== "opus"}
+                />
+              ))
+              : CODEX_REASONING_OPTIONS.map((effort) => (
+                <PopoverMenuItem
+                  key={effort.id}
+                  onClick={() => {
+                    onCodexReasoningEffortChange(effort.id)
+                    close()
+                  }}
+                  selected={(modelOptions as CodexModelOptions).reasoningEffort === effort.id}
+                  icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
+                  label={effort.label}
+                />
+              ))
+          )}
+        </InputPopover>
+      ) : null}
 
       {selectedProvider === "codex" ? (
         <InputPopover

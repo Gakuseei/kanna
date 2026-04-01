@@ -27,6 +27,35 @@ describe("ChatPreferenceControls", () => {
     expect(html).not.toContain("Plan Mode")
   })
 
+  test("falls back to local codex reasoning options when runtime provider data omits efforts", () => {
+    const runtimeProviders = PROVIDERS.map((provider) =>
+      provider.id === "codex"
+        ? {
+            ...provider,
+            efforts: [],
+          }
+        : provider
+    )
+
+    const html = renderToStaticMarkup(
+      <ChatPreferenceControls
+        availableProviders={runtimeProviders}
+        selectedProvider="codex"
+        model="gpt-5.4"
+        modelOptions={{ reasoningEffort: "high", fastMode: false }}
+        onProviderChange={() => {}}
+        onModelChange={() => {}}
+        onClaudeReasoningEffortChange={() => {}}
+        onCodexReasoningEffortChange={() => {}}
+        onCodexFastModeChange={() => {}}
+        includePlanMode={false}
+      />
+    )
+
+    expect(html).toContain("High")
+    expect(html).toContain("Standard")
+  })
+
   test("renders claude plan mode controls when enabled", () => {
     const html = renderToStaticMarkup(
       <ChatPreferenceControls

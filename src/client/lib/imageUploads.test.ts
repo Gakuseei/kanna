@@ -1,5 +1,19 @@
-import { describe, expect, test } from "bun:test"
-import { clipboardHasTextPayload, extractImageFilesFromDataTransfer } from "./imageUploads"
+import { afterEach, describe, expect, mock, test } from "bun:test"
+
+const originalWindow = globalThis.window
+const originalNavigator = globalThis.navigator
+const invokeMock = mock()
+
+mock.module("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+}))
+
+import {
+  clipboardHasTextPayload,
+  extractImageFilesFromDataTransfer,
+  readBrowserClipboardImageFile,
+  readNativeClipboardImageFile,
+} from "./imageUploads"
 
 function createTransferFile(name: string, type: string, content = "test") {
   return new File([content], name, { type, lastModified: 123 })
@@ -14,6 +28,15 @@ function createClipboardItem(file: File | null, type = file?.type ?? "image/png"
     },
   } as DataTransferItem
 }
+
+afterEach(() => {
+  invokeMock.mockReset()
+  globalThis.window = originalWindow
+  Object.defineProperty(globalThis, "navigator", {
+    value: originalNavigator,
+    configurable: true,
+  })
+})
 
 describe("extractImageFilesFromDataTransfer", () => {
   test("reads images from clipboard files", () => {
@@ -82,5 +105,83 @@ describe("clipboardHasTextPayload", () => {
       types: ["image/png"] as unknown as DOMStringList,
       getData: () => "",
     })).toBe(false)
+  })
+})
+
+describe("readNativeClipboardImageFile", () => {
+  test("reads a clipboard image from the tauri bridge", async () => {
+    globalThis.window = {
+      isTauri: true,
+      atob: (value: string) => Buffer.from(value, "base64").toString("binary"),
+    } as unknown as Window & typeof globalThis
+    invokeMock.mockResolvedValue({
+      pngBase64: Buffer.from("png-bytes").toString("base64"),
+      width: 16,
+      height: 16,
+    })
+
+    const file = await readNativeClipboardImageFile()
+    expect(file).toBeInstanceOf(File)
+    expect(file?.name).toMatch(/^clipboard-.*\.png$/)
+    expect(file?.type).toBe("image/png")
+    expect(await file?.text()).toBe("png-bytes")
+  })
+
+  test("throws when the tauri bridge returns an invalid payload", async () => {
+    globalThis.window = {
+      isTauri: true,
+      atob: (value: string) => Buffer.from(value, "base64").toString("binary"),
+    } as unknown as Window & typeof globalThis
+    invokeMock.mockResolvedValue({
+      png_base64: Buffer.from("png-bytes").toString("base64"),
+      width: 16,
+      height: 16,
+    })
+
+    await expect(readNativeClipboardImageFile()).rejects.toThrow(
+      "Clipboard image could not be read from the desktop bridge.",
+    )
+  })
+})
+
+describe("readBrowserClipboardImageFile", () => {
+  test("reads an image clipboard item from the browser clipboard api", async () => {
+    const blob = new Blob(["png-bytes"], { type: "image/png" })
+    const read = mock().mockResolvedValue([
+      {
+        types: ["image/png"],
+        getType: mock().mockResolvedValue(blob),
+      },
+    ])
+
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        clipboard: { read },
+      },
+      configurable: true,
+    })
+
+    const file = await readBrowserClipboardImageFile()
+    expect(file).toBeInstanceOf(File)
+    expect(file?.type).toBe("image/png")
+    expect(await file?.text()).toBe("png-bytes")
+  })
+
+  test("returns null when browser clipboard has no supported image", async () => {
+    const read = mock().mockResolvedValue([
+      {
+        types: ["text/plain"],
+        getType: mock(),
+      },
+    ])
+
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        clipboard: { read },
+      },
+      configurable: true,
+    })
+
+    await expect(readBrowserClipboardImageFile()).resolves.toBeNull()
   })
 })

@@ -25,6 +25,7 @@ import {
   createPendingComposerImages,
   extractImageFiles,
   extractImageFilesFromDataTransfer,
+  readBrowserClipboardImageFile,
   readNativeClipboardImageFile,
   revokePendingComposerImages,
   stageImages,
@@ -98,6 +99,24 @@ function createLockedComposerState(
       model: providerDefaults.claude.model,
       modelOptions: { ...providerDefaults.claude.modelOptions },
       planMode: providerDefaults.claude.planMode,
+    }
+  }
+
+  if (provider === "hermes") {
+    if (composerState.provider === "hermes") {
+      return {
+        provider: "hermes",
+        model: composerState.model,
+        modelOptions: { ...composerState.modelOptions },
+        planMode: false,
+      }
+    }
+
+    return {
+      provider: "hermes",
+      model: providerDefaults.hermes.model,
+      modelOptions: { ...providerDefaults.hermes.modelOptions },
+      planMode: false,
     }
   }
 
@@ -375,6 +394,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
           }
         }
 
+        if (next.provider === "hermes") {
+          return next
+        }
+
         return {
           ...next,
           modelOptions: { ...next.modelOptions, reasoningEffort: reasoningEffort as CodexReasoningEffort },
@@ -385,6 +408,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
 
     if (selectedProvider === "claude") {
       setComposerModelOptions({ reasoningEffort: reasoningEffort as ClaudeReasoningEffort })
+      return
+    }
+
+    if (selectedProvider === "hermes") {
       return
     }
 
@@ -457,16 +484,23 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }
 
   async function addNativeClipboardImage(showEmptyError = false) {
-    const file = await readNativeClipboardImageFile()
-    if (!file) {
-      if (showEmptyError) {
-        setSubmitError("Clipboard does not contain a supported image.")
+    try {
+      const file = await readBrowserClipboardImageFile() ?? await readNativeClipboardImageFile()
+      if (!file) {
+        if (showEmptyError) {
+          setSubmitError("Clipboard does not contain a supported image.")
+        }
+        return false
       }
+
+      await addPendingFiles([file])
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("[ChatInput] Native clipboard image read failed:", error)
+      setSubmitError(message)
       return false
     }
-
-    await addPendingFiles([file])
-    return true
   }
 
   function scheduleNativeClipboardFallback() {
@@ -480,7 +514,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   async function handleSubmit() {
     if (!hasDraftContent || isSubmitting) return
 
-    if (selectedProvider === "claude" && pendingImages.length > 0) {
+    if (selectedProvider !== "codex" && pendingImages.length > 0) {
       setSubmitError("Images are currently supported only for Codex chats.")
       return
     }
@@ -489,8 +523,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     let modelOptions: ModelOptions
     if (providerPrefs.provider === "claude") {
       modelOptions = { claude: { ...providerPrefs.modelOptions } }
-    } else {
+    } else if (providerPrefs.provider === "codex") {
       modelOptions = { codex: { ...providerPrefs.modelOptions } }
+    } else {
+      modelOptions = { hermes: { ...providerPrefs.modelOptions } }
     }
 
     const submitOptions: SubmitOptions = {
@@ -907,10 +943,11 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
             setLockedComposerState((current) => {
               const next = current ?? createLockedComposerState(selectedProvider, composerState, providerDefaults)
               if (next.provider === "claude") return next
+              if (next.provider === "hermes") return next
               return {
                 ...next,
                 modelOptions: { ...next.modelOptions, fastMode },
-              }
+              } satisfies ComposerState
             })
             return
           }
