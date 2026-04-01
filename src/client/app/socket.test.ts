@@ -117,16 +117,20 @@ describe("KannaSocket", () => {
   const originalWindow = globalThis.window
   const originalDocument = globalThis.document
   const originalWebSocket = globalThis.WebSocket
+  const originalDateNow = Date.now
 
   let windowTarget: FakeEventTarget
   let documentTarget: FakeEventTarget & { visibilityState: "visible" | "hidden" }
   let timers: FakeTimers
+  let nowMs: number
 
   beforeEach(() => {
     FakeWebSocket.instances = []
     timers = new FakeTimers()
+    nowMs = 1_000_000
     windowTarget = new FakeEventTarget()
     documentTarget = Object.assign(new FakeEventTarget(), { visibilityState: "visible" as const })
+    Date.now = () => nowMs
 
     ;(globalThis as any).window = Object.assign(windowTarget, {
       setTimeout: timers.setTimeout,
@@ -140,6 +144,7 @@ describe("KannaSocket", () => {
   })
 
   afterEach(() => {
+    Date.now = originalDateNow
     ;(globalThis as any).window = originalWindow
     ;(globalThis as any).document = originalDocument
     ;(globalThis as any).WebSocket = originalWebSocket
@@ -162,8 +167,8 @@ describe("KannaSocket", () => {
     socket.start()
     const ws = FakeWebSocket.instances[0]!
     ws.open()
-    ;(socket as any).lastOpenAt = Date.now() - 30_000
-    ;(socket as any).lastMessageAt = Date.now() - 30_000
+    ;(socket as any).lastOpenAt = nowMs - 30_000
+    ;(socket as any).lastMessageAt = nowMs - 30_000
 
     const healthCheck = socket.ensureHealthyConnection()
     const ping = ws.sent[0]
@@ -183,8 +188,8 @@ describe("KannaSocket", () => {
     socket.start()
     const firstWs = FakeWebSocket.instances[0]!
     firstWs.open()
-    ;(socket as any).lastOpenAt = Date.now() - 30_000
-    ;(socket as any).lastMessageAt = Date.now() - 30_000
+    ;(socket as any).lastOpenAt = nowMs - 30_000
+    ;(socket as any).lastMessageAt = nowMs - 30_000
 
     const healthCheck = socket.ensureHealthyConnection()
     timers.runTimeout((socket as any).pingTimeoutTimer)
@@ -201,8 +206,8 @@ describe("KannaSocket", () => {
     const ws = FakeWebSocket.instances[0]!
     ws.open()
 
-    ;(socket as any).lastOpenAt = Date.now() - 30_000
-    ;(socket as any).lastMessageAt = Date.now() - 30_000
+    ;(socket as any).lastOpenAt = nowMs - 30_000
+    ;(socket as any).lastMessageAt = nowMs - 30_000
     windowTarget.dispatchEvent("focus")
     let ping = ws.sent.pop()
     ws.receive({ v: 1, type: "ack", id: ping?.id })
@@ -210,16 +215,16 @@ describe("KannaSocket", () => {
 
     documentTarget.visibilityState = "hidden"
     documentTarget.dispatchEvent("visibilitychange")
-    ;(socket as any).lastOpenAt = Date.now() - 30_000
-    ;(socket as any).lastMessageAt = Date.now() - 30_000
+    ;(socket as any).lastOpenAt = nowMs - 30_000
+    ;(socket as any).lastMessageAt = nowMs - 30_000
     documentTarget.visibilityState = "visible"
     documentTarget.dispatchEvent("visibilitychange")
     ping = ws.sent.pop()
     ws.receive({ v: 1, type: "ack", id: ping?.id })
     await Promise.resolve()
 
-    ;(socket as any).lastOpenAt = Date.now() - 30_000
-    ;(socket as any).lastMessageAt = Date.now() - 30_000
+    ;(socket as any).lastOpenAt = nowMs - 30_000
+    ;(socket as any).lastMessageAt = nowMs - 30_000
     windowTarget.dispatchEvent("online")
     ping = ws.sent.pop()
 
@@ -251,8 +256,8 @@ describe("KannaSocket", () => {
     socket.start()
     const ws = FakeWebSocket.instances[0]!
     ws.open()
-    ;(socket as any).lastOpenAt = Date.now() - 30_000
-    ;(socket as any).lastMessageAt = Date.now() - 30_000
+    ;(socket as any).lastOpenAt = nowMs - 30_000
+    ;(socket as any).lastMessageAt = nowMs - 30_000
 
     timers.runInterval((socket as any).heartbeatTimer)
 

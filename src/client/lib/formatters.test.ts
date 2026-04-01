@@ -32,7 +32,7 @@ describe("formatBashCommandTitle", () => {
 })
 
 describe("formatSidebarAgeLabel", () => {
-  const now = Date.UTC(2026, 2, 17, 12, 0, 0)
+  const now = 1_500_000_000
 
   test("returns null when there is no sent message timestamp", () => {
     expect(formatSidebarAgeLabel(undefined, now)).toBeNull()

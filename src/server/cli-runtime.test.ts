@@ -4,6 +4,7 @@ import { CLI_SUPPRESS_OPEN_ONCE_ENV_VAR } from "./restart"
 
 const originalRuntimeProfile = process.env.KANNA_RUNTIME_PROFILE
 const originalSuppressOpen = process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR]
+const originalDisableSelfUpdate = process.env.KANNA_DISABLE_SELF_UPDATE
 
 afterEach(() => {
   if (originalRuntimeProfile === undefined) {
@@ -15,6 +16,11 @@ afterEach(() => {
     delete process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR]
   } else {
     process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR] = originalSuppressOpen
+  }
+  if (originalDisableSelfUpdate === undefined) {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
+  } else {
+    process.env.KANNA_DISABLE_SELF_UPDATE = originalDisableSelfUpdate
   }
 })
 
@@ -209,6 +215,10 @@ describe("classifyInstallVersionFailure", () => {
 })
 
 describe("runCli", () => {
+  afterEach(() => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
+  })
+
   test("skips update checks for --version", async () => {
     const { calls, deps } = createDeps()
 
@@ -221,6 +231,7 @@ describe("runCli", () => {
   })
 
   test("starts normally when no newer version exists", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps()
 
     const result = await runCli(["--port", "4000", "--no-open"], deps)
@@ -247,6 +258,7 @@ describe("runCli", () => {
 
   test("logs the dev data dir when the dev runtime profile is active", async () => {
     process.env.KANNA_RUNTIME_PROFILE = "dev"
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps()
 
     await runCli(["--port", "4000", "--no-open"], deps)
@@ -268,6 +280,7 @@ describe("runCli", () => {
 
   test("opens the root route in the browser", async () => {
     delete process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR]
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps()
 
     await runCli(["--port", "4000"], deps)
@@ -277,6 +290,7 @@ describe("runCli", () => {
 
   test("opens browser at hostname when --host <host> is given", async () => {
     delete process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR]
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps()
 
     await runCli(["--host", "dev-box", "--port", "4000"], deps)
@@ -286,6 +300,7 @@ describe("runCli", () => {
 
   test("suppresses browser open for a ui-triggered restarted child", async () => {
     process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR] = "1"
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps()
 
     await runCli(["--port", "4000"], deps)
@@ -295,6 +310,7 @@ describe("runCli", () => {
 
   test("starts a share tunnel and prints qr/public/local urls", async () => {
     delete process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR]
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps()
 
     const result = await runCli(["--share", "--port", "4000"], deps)
@@ -318,6 +334,7 @@ describe("runCli", () => {
   })
 
   test("logs share setup progress from the default tunnel helper", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps({
       startShareTunnel: undefined,
       renderShareQr: async () => "[qr]",
@@ -340,6 +357,7 @@ describe("runCli", () => {
   })
 
   test("uses the actual bound port for --share", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps({
       startServer: async (options) => {
         calls.startServer.push(options)
@@ -357,6 +375,7 @@ describe("runCli", () => {
   })
 
   test("fails cleanly when share tunnel startup fails", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     let serverStopped = false
     const { calls, deps } = createDeps({
       startServer: async (options) => {
@@ -382,6 +401,7 @@ describe("runCli", () => {
   })
 
   test("returns restarting when a newer version is available", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps({
       fetchLatestVersion: async (packageName) => {
         calls.fetchLatestVersion.push(packageName)
@@ -397,6 +417,7 @@ describe("runCli", () => {
   })
 
   test("falls back to current version when install fails", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps({
       fetchLatestVersion: async (packageName) => {
         calls.fetchLatestVersion.push(packageName)
@@ -421,6 +442,7 @@ describe("runCli", () => {
   })
 
   test("falls back to current version when the registry check fails", async () => {
+    delete process.env.KANNA_DISABLE_SELF_UPDATE
     const { calls, deps } = createDeps({
       fetchLatestVersion: async (packageName) => {
         calls.fetchLatestVersion.push(packageName)
