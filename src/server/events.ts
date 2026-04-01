@@ -11,6 +11,7 @@ export interface ChatRecord {
   createdAt: number
   updatedAt: number
   deletedAt?: number
+  unread: boolean
   provider: AgentProvider | null
   planMode: boolean
   sessionToken: string | null
@@ -22,7 +23,6 @@ export interface StoreState {
   projectsById: Map<string, ProjectRecord>
   projectIdsByPath: Map<string, string>
   chatsById: Map<string, ChatRecord>
-  messagesByChatId: Map<string, TranscriptEntry[]>
 }
 
 export interface SnapshotFile {
@@ -30,7 +30,7 @@ export interface SnapshotFile {
   generatedAt: number
   projects: ProjectRecord[]
   chats: ChatRecord[]
-  messages: Array<{ chatId: string; entries: TranscriptEntry[] }>
+  messages?: Array<{ chatId: string; entries: TranscriptEntry[] }>
 }
 
 export type ProjectEvent = {
@@ -83,6 +83,13 @@ export type ChatEvent =
       chatId: string
       planMode: boolean
     }
+  | {
+      v: 2
+      type: "chat_read_state_set"
+      timestamp: number
+      chatId: string
+      unread: boolean
+    }
 
 export type MessageEvent = {
   v: 2
@@ -133,7 +140,6 @@ export function createEmptyState(): StoreState {
     projectsById: new Map(),
     projectIdsByPath: new Map(),
     chatsById: new Map(),
-    messagesByChatId: new Map(),
   }
 }
 

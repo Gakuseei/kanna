@@ -5,6 +5,7 @@ import {
   Code,
   Info,
   Loader2,
+  Menu,
   Monitor,
   Moon,
   MessageSquareQuote,
@@ -43,6 +44,7 @@ import {
 } from "../components/ui/select"
 import { useTheme, type ThemePreference } from "../hooks/useTheme"
 import { KEYBINDING_ACTION_LABELS, formatKeybindingInput, getResolvedKeybindings, parseKeybindingInput } from "../lib/keybindings"
+import { playChatNotificationSound } from "../lib/chatSounds"
 import { cn } from "../lib/utils"
 import {
   DEFAULT_TERMINAL_MIN_COLUMN_WIDTH,
@@ -54,6 +56,7 @@ import {
   useTerminalPreferencesStore,
 } from "../stores/terminalPreferencesStore"
 import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
+import { CHAT_SOUND_OPTIONS, useChatSoundPreferencesStore, type ChatSoundId, type ChatSoundPreference } from "../stores/chatSoundPreferencesStore"
 import type { KannaState } from "./useKannaState"
 
 const sidebarItems = [
@@ -102,6 +105,17 @@ const editorOptions: { value: EditorPreset; label: string }[] = [
   { value: "vscode", label: "VS Code" },
   { value: "windsurf", label: "Windsurf" },
   { value: "custom", label: "Custom" },
+]
+
+const chatSoundPreferenceOptions: { value: ChatSoundPreference; label: string }[] = [
+  { value: "never", label: "Never" },
+  { value: "unfocused", label: "When Unfocused" },
+  { value: "always", label: "Always" },
+]
+
+const transcriptTocOptions: { value: "enabled" | "disabled"; label: string }[] = [
+  { value: "enabled", label: "Enabled" },
+  { value: "disabled", label: "Disabled" },
 ]
 
 const GITHUB_RELEASES_URL = "https://api.github.com/repos/jakemor/kanna/releases"
@@ -158,6 +172,13 @@ export function getGeneralHeaderAction(updateSnapshot: UpdateSnapshot | null, up
     spinning: isChecking,
     variant: "outline" as const,
   }
+}
+
+export function shouldPreviewChatSoundChange(
+  previousValue: string,
+  nextValue: string
+) {
+  return previousValue !== nextValue
 }
 
 export function resetSettingsPageChangelogCache() {
@@ -364,12 +385,17 @@ function SettingsRow({
 }) {
   return (
     <div className={bordered ? "border-t border-border" : undefined}>
-      <div className={`flex justify-between gap-8 py-5 ${alignStart ? "items-start" : "items-center"}`}>
+      <div
+        className={cn(
+          "flex flex-col gap-4 py-5 md:flex-row md:justify-between md:gap-8",
+          alignStart ? "md:items-start" : "md:items-center"
+        )}
+      >
         <div className="min-w-0 max-w-xl">
           <div className="text-sm font-medium text-foreground">{title}</div>
           <div className="mt-1 text-[13px] text-muted-foreground">{description}</div>
         </div>
-        <div className="flex shrink-0 items-center justify-end">{children}</div>
+        <div className="flex items-center justify-start md:shrink-0 md:justify-end">{children}</div>
       </div>
     </div>
   )
@@ -396,10 +422,16 @@ export function SettingsPage() {
   const setMinColumnWidth = useTerminalPreferencesStore((store) => store.setMinColumnWidth)
   const setEditorPreset = useTerminalPreferencesStore((store) => store.setEditorPreset)
   const setEditorCommandTemplate = useTerminalPreferencesStore((store) => store.setEditorCommandTemplate)
+  const chatSoundPreference = useChatSoundPreferencesStore((store) => store.chatSoundPreference)
+  const chatSoundId = useChatSoundPreferencesStore((store) => store.chatSoundId)
+  const setChatSoundPreference = useChatSoundPreferencesStore((store) => store.setChatSoundPreference)
+  const setChatSoundId = useChatSoundPreferencesStore((store) => store.setChatSoundId)
   const keybindings = state.keybindings
   const defaultProvider = useChatPreferencesStore((store) => store.defaultProvider)
   const providerDefaults = useChatPreferencesStore((store) => store.providerDefaults)
+  const showTranscriptToc = useChatPreferencesStore((store) => store.showTranscriptToc)
   const setDefaultProvider = useChatPreferencesStore((store) => store.setDefaultProvider)
+  const setShowTranscriptToc = useChatPreferencesStore((store) => store.setShowTranscriptToc)
   const setProviderDefaultModel = useChatPreferencesStore((store) => store.setProviderDefaultModel)
   const setProviderDefaultModelOptions = useChatPreferencesStore((store) => store.setProviderDefaultModelOptions)
   const setProviderDefaultPlanMode = useChatPreferencesStore((store) => store.setProviderDefaultPlanMode)
@@ -532,6 +564,24 @@ export function SettingsPage() {
     setEditorCommandTemplate(editorCommandDraft)
   }
 
+  function handleChatSoundPreferenceChange(nextValue: ChatSoundPreference) {
+    if (!shouldPreviewChatSoundChange(chatSoundPreference, nextValue)) {
+      return
+    }
+
+    setChatSoundPreference(nextValue)
+    void playChatNotificationSound(chatSoundId, 1).catch(() => undefined)
+  }
+
+  function handleChatSoundIdChange(nextValue: ChatSoundId) {
+    if (!shouldPreviewChatSoundChange(chatSoundId, nextValue)) {
+      return
+    }
+
+    setChatSoundId(nextValue)
+    void playChatNotificationSound(nextValue, 1).catch(() => undefined)
+  }
+
   async function commitKeybindings() {
     try {
       setKeybindingsError(null)
@@ -661,7 +711,41 @@ export function SettingsPage() {
         </aside>
 
         <div className="min-w-0 flex-1 overflow-y-auto">
-          <div className="w-full px-6 pt-16 pb-32">
+          <div className="border-b border-border py-2 md:hidden">
+            <div className="overflow-x-auto pr-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex min-w-max items-center gap-2">
+                <div className=" sticky left-0 bg-gradient-to-r from-background via-background/80 to-transparent px-2  py-1">
+                <button
+                  type="button"
+                  onClick={state.openSidebar}
+                  className="flex shrink-0 items-center p-2 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                  aria-label="Open sidebar"
+                  title="Open sidebar"
+                >
+                  <Menu className="h-4 w-4 shrink-0" />
+                </button>
+                </div>
+                {sidebarItems.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => navigate(`/settings/${item.id}`)}
+                    className={cn(
+                      "flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors",
+                      item.id === selectedPage
+                        ? "border-transparent bg-muted font-medium text-foreground"
+                        : "border-border bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    )}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    <span className="whitespace-nowrap">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full px-4 pb-32 pt-8 md:px-6 md:pt-16">
             {isConnecting ? (
               <div className="flex min-h-[240px] items-center justify-center rounded-2xl border border-border bg-card/40 px-4 py-6 text-sm text-muted-foreground">
                 <div className="flex items-center gap-3">
@@ -758,6 +842,64 @@ export function SettingsPage() {
                       </SettingsRow>
 
                       <SettingsRow
+                        title="Chat Sounds"
+                        description="Play a pop when a chat starts waiting on you or the unread chat count increases"
+                      >
+                        <Select
+                          value={chatSoundPreference}
+                          onValueChange={(value) => handleChatSoundPreferenceChange(value as ChatSoundPreference)}
+                        >
+                          <SelectTrigger className="min-w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {chatSoundPreferenceOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </SettingsRow>
+
+                      <SettingsRow
+                        title="Chat Sound"
+                        description="The bundled sound used for chat notification playback and previews"
+                      >
+                        <Select
+                          value={chatSoundId}
+                          onValueChange={(value) => handleChatSoundIdChange(value as ChatSoundId)}
+                        >
+                          <SelectTrigger className="min-w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {CHAT_SOUND_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </SettingsRow>
+
+                      <SettingsRow
+                        title="Transcript Table of Contents"
+                        description="Show a floating list of user messages in chat when the layout is wider than 1200 px"
+                      >
+                        <SegmentedControl
+                          value={showTranscriptToc ? "enabled" : "disabled"}
+                          onValueChange={(value) => setShowTranscriptToc(value === "enabled")}
+                          options={transcriptTocOptions}
+                          size="sm"
+                        />
+                      </SettingsRow>
+
+                      <SettingsRow
                         title="Default Editor"
                         description="Used by the navbar code button and local file links in chat"
                         alignStart
@@ -811,7 +953,7 @@ export function SettingsPage() {
                         title="Terminal Scrollback"
                         description="Lines retained for embedded terminal history"
                       >
-                        <div className="flex min-w-0 flex-col items-end gap-2">
+                        <div className="flex w-full min-w-0 flex-col items-stretch gap-2 md:w-auto md:items-end">
                           <Input
                             type="number"
                             min={MIN_TERMINAL_SCROLLBACK}
@@ -821,9 +963,9 @@ export function SettingsPage() {
                             onChange={(event) => setScrollbackDraft(event.target.value)}
                             onBlur={commitScrollback}
                             onKeyDown={(event) => handleNumberInputKeyDown(event, commitScrollback)}
-                            className="hide-number-steppers w-28 text-right font-mono"
+                            className="hide-number-steppers w-full text-left font-mono md:w-28 md:text-right"
                           />
-                          <div className="text-right text-xs text-muted-foreground">
+                          <div className="text-left text-xs text-muted-foreground md:text-right">
                             {MIN_TERMINAL_SCROLLBACK}-{MAX_TERMINAL_SCROLLBACK} lines
                             {scrollbackLines === DEFAULT_TERMINAL_SCROLLBACK ? " (default)" : ""}
                           </div>
@@ -834,7 +976,7 @@ export function SettingsPage() {
                         title="Terminal Min Column Width"
                         description="Minimum width for each terminal pane"
                       >
-                        <div className="flex min-w-0 flex-col items-end gap-2">
+                        <div className="flex w-full min-w-0 flex-col items-stretch gap-2 md:w-auto md:items-end">
                           <Input
                             type="number"
                             min={MIN_TERMINAL_MIN_COLUMN_WIDTH}
@@ -844,9 +986,9 @@ export function SettingsPage() {
                             onChange={(event) => setMinColumnWidthDraft(event.target.value)}
                             onBlur={commitMinColumnWidth}
                             onKeyDown={(event) => handleNumberInputKeyDown(event, commitMinColumnWidth)}
-                            className="hide-number-steppers w-28 text-right font-mono"
+                            className="hide-number-steppers w-full text-left font-mono md:w-28 md:text-right"
                           />
-                          <div className="text-right text-xs text-muted-foreground">
+                          <div className="text-left text-xs text-muted-foreground md:text-right">
                             {MIN_TERMINAL_MIN_COLUMN_WIDTH}-{MAX_TERMINAL_MIN_COLUMN_WIDTH} px
                             {minColumnWidth === DEFAULT_TERMINAL_MIN_COLUMN_WIDTH ? " (default)" : ""}
                           </div>
@@ -899,11 +1041,13 @@ export function SettingsPage() {
                           onModelChange={(_, model) => {
                             setProviderDefaultModel("claude", model)
                           }}
-                          onClaudeReasoningEffortChange={(reasoningEffort) => {
-                            setProviderDefaultModelOptions("claude", { reasoningEffort })
+                          onModelOptionChange={(change) => {
+                            if (change.type === "claudeReasoningEffort") {
+                              setProviderDefaultModelOptions("claude", { reasoningEffort: change.effort })
+                            } else if (change.type === "contextWindow") {
+                              setProviderDefaultModelOptions("claude", { contextWindow: change.contextWindow })
+                            }
                           }}
-                          onCodexReasoningEffortChange={() => {}}
-                          onCodexFastModeChange={() => {}}
                           planMode={providerDefaults.claude.planMode}
                           onPlanModeChange={(planMode) => setProviderDefaultPlanMode("claude", planMode)}
                           includePlanMode
@@ -928,12 +1072,12 @@ export function SettingsPage() {
                           onModelChange={(_, model) => {
                             setProviderDefaultModel("codex", model)
                           }}
-                          onClaudeReasoningEffortChange={() => {}}
-                          onCodexReasoningEffortChange={(reasoningEffort) => {
-                            setProviderDefaultModelOptions("codex", { reasoningEffort })
-                          }}
-                          onCodexFastModeChange={(fastMode) => {
-                            setProviderDefaultModelOptions("codex", { fastMode })
+                          onModelOptionChange={(change) => {
+                            if (change.type === "codexReasoningEffort") {
+                              setProviderDefaultModelOptions("codex", { reasoningEffort: change.effort })
+                            } else if (change.type === "fastMode") {
+                              setProviderDefaultModelOptions("codex", { fastMode: change.fastMode })
+                            }
                           }}
                           planMode={providerDefaults.codex.planMode}
                           onPlanModeChange={(planMode) => setProviderDefaultPlanMode("codex", planMode)}
@@ -1137,16 +1281,16 @@ export function SettingsPage() {
       {showFooter ? (
         <div className="absolute bottom-0 left-0 right-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <div className="px-6 py-[14.25px]">
-            <div className="grid gap-3 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 text-xs text-muted-foreground grid-cols-2 lg:grid-cols-4">
               <div>
                 <div className="mb-1 uppercase tracking-wide text-[11px] text-muted-foreground/80">Machine</div>
                 <div className="text-foreground/80">{machineName}</div>
               </div>
-              <div>
+              <div className="hidden md:block">
                 <div className="mb-1 uppercase tracking-wide text-[11px] text-muted-foreground/80">Connection</div>
                 <div className="text-foreground/80">{state.connectionStatus}</div>
               </div>
-              <div>
+              <div className="hidden md:block">
                 <div className="mb-1 uppercase tracking-wide text-[11px] text-muted-foreground/80">Projects Indexed</div>
                 <div className="text-foreground/80">{projectCount}</div>
               </div>

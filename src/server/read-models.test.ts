@@ -19,6 +19,7 @@ describe("read models", () => {
       title: "Chat",
       createdAt: 1,
       updatedAt: 1,
+      unread: true,
       provider: "codex",
       planMode: false,
       sessionToken: "thread-1",
@@ -27,6 +28,7 @@ describe("read models", () => {
 
     const sidebar = deriveSidebarData(state, new Map())
     expect(sidebar.projectGroups[0]?.chats[0]?.provider).toBe("codex")
+    expect(sidebar.projectGroups[0]?.chats[0]?.unread).toBe(true)
   })
 
   test("includes available providers in chat snapshots", () => {
@@ -45,13 +47,14 @@ describe("read models", () => {
       title: "Chat",
       createdAt: 1,
       updatedAt: 1,
+      unread: false,
       provider: "claude",
       planMode: true,
       sessionToken: "session-1",
       lastTurnOutcome: null,
     })
 
-    const chat = deriveChatSnapshot(state, new Map(), "chat-1")
+    const chat = deriveChatSnapshot(state, new Map(), "chat-1", () => [])
     expect(chat?.runtime.provider).toBe("claude")
     expect(chat?.availableProviders.length).toBeGreaterThan(1)
     expect(chat?.availableProviders.find((provider) => provider.id === "codex")?.models.map((model) => model.id)).toEqual([
@@ -77,6 +80,7 @@ describe("read models", () => {
       title: "Chat",
       createdAt: 1,
       updatedAt: 75,
+      unread: false,
       provider: "codex",
       planMode: false,
       sessionToken: null,

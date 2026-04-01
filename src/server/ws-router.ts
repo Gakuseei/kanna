@@ -125,7 +125,7 @@ export function createWsRouter({
       id,
       snapshot: {
         type: "chat",
-        data: deriveChatSnapshot(store.state, agent.getActiveStatuses(), topic.chatId),
+        data: deriveChatSnapshot(store.state, agent.getActiveStatuses(), topic.chatId, (chatId) => store.getMessages(chatId)),
       },
     }
   }
@@ -139,6 +139,16 @@ export function createWsRouter({
   function broadcastSnapshots() {
     for (const ws of sockets) {
       pushSnapshots(ws)
+    }
+  }
+
+  function broadcastError(message: string) {
+    for (const ws of sockets) {
+      send(ws, {
+        v: PROTOCOL_VERSION,
+        type: "error",
+        message,
+      })
     }
   }
 
@@ -186,6 +196,8 @@ export function createWsRouter({
       }
     }
   }) ?? (() => {})
+
+  agent.setBackgroundErrorReporter?.(broadcastError)
 
   async function handleCommand(ws: ServerWebSocket<ClientState>, message: Extract<ClientEnvelope, { type: "command" }>) {
     const { command, id } = message
@@ -303,6 +315,11 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           break
         }
+        case "chat.markRead": {
+          await store.setChatReadState(command.chatId, false)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
+          break
+        }
         case "chat.send": {
           const result = await agent.send(command)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
@@ -411,6 +428,7 @@ export function createWsRouter({
       void handleCommand(ws, parsed)
     },
     dispose() {
+      agent.setBackgroundErrorReporter?.(null)
       disposeTerminalEvents()
       disposeKeybindingEvents()
       disposeUpdateEvents()

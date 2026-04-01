@@ -1,7 +1,7 @@
 import { query, type CanUseTool, type PermissionResult, type Query } from "@anthropic-ai/claude-agent-sdk"
 import type {
   AgentProvider,
-  ImageAttachment,
+  ChatAttachment,
   NormalizedToolCall,
   PendingToolSnapshot,
   KannaStatus,
@@ -11,11 +11,10 @@ import { normalizeToolCall } from "../shared/tools"
 import type { ClientCommand } from "../shared/protocol"
 import { EventStore } from "./event-store"
 import { CodexAppServerManager } from "./codex-app-server"
-import { generateTitleForChat } from "./generate-title"
+import { type GenerateChatTitleResult, generateTitleForChatDetailed } from "./generate-title"
 import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
 import { HermesSshSettingsManager } from "./hermes-ssh-settings"
 import { HermesSshManager } from "./hermes-ssh-manager"
-import { MediaStore } from "./media-store"
 import {
   codexServiceTierFromModelOptions,
   getServerProviderCatalog,
@@ -24,6 +23,8 @@ import {
   normalizeHermesModelOptions,
   normalizeServerModel,
 } from "./provider-catalog"
+import { resolveClaudeApiModelId } from "../shared/types"
+import { fallbackTitleFromMessage } from "./generate-title"
 
 const CLAUDE_TOOLSET = [
   "Skill",
@@ -68,12 +69,11 @@ interface ActiveTurn {
 
 interface AgentCoordinatorArgs {
   store: EventStore
-  mediaStore?: MediaStore
   onStateChange: () => void
   codexManager?: CodexAppServerManager
   hermesManager?: HermesSshManager
   hermesSshSettings?: HermesSshSettingsManager
-  generateTitle?: (messageContent: string, cwd: string) => Promise<string | null>
+  generateTitle?: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
 }
 
 function timestamped<T extends Omit<TranscriptEntry, "_id" | "createdAt">>(
@@ -96,6 +96,41 @@ function stringFromUnknown(value: unknown) {
   }
 }
 
+function escapeXmlAttribute(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+}
+
+export function buildAttachmentHintText(attachments: ChatAttachment[]) {
+  if (attachments.length === 0) return ""
+
+  const lines = attachments.map((attachment) => (
+    `<attachment kind="${escapeXmlAttribute(attachment.kind)}" mime_type="${escapeXmlAttribute(attachment.mimeType)}" path="${escapeXmlAttribute(attachment.absolutePath)}" project_path="${escapeXmlAttribute(attachment.relativePath)}" size_bytes="${attachment.size}" display_name="${escapeXmlAttribute(attachment.displayName)}" />`
+  ))
+
+  return [
+    "<kanna-attachments>",
+    ...lines,
+    "</kanna-attachments>",
+  ].join("\n")
+}
+
+export function buildPromptText(content: string, attachments: ChatAttachment[]) {
+  const attachmentHint = buildAttachmentHintText(attachments)
+  if (!attachmentHint) {
+    return content.trim()
+  }
+
+  const trimmed = content.trim()
+  return [
+    trimmed || "Please inspect the attached files.",
+    attachmentHint,
+  ].join("\n\n").trim()
+}
+
 function discardedToolResult(
   tool: NormalizedToolCall & { toolKind: "ask_user_question" | "exit_plan_mode" }
 ) {
@@ -109,20 +144,6 @@ function discardedToolResult(
   return {
     discarded: true,
   }
-}
-
-function titleSeedFromPrompt(content: string, attachments: ImageAttachment[]) {
-  const trimmed = content.trim()
-  if (trimmed) {
-    return trimmed
-  }
-  if (attachments.length === 1) {
-    return attachments[0]?.fileName ?? "Image"
-  }
-  if (attachments.length > 1) {
-    return `${attachments.length} images`
-  }
-  return ""
 }
 
 export function normalizeClaudeStreamMessage(message: any): TranscriptEntry[] {
@@ -353,22 +374,25 @@ async function startClaudeTurn(args: {
 
 export class AgentCoordinator {
   private readonly store: EventStore
-  private readonly mediaStore: MediaStore | null
   private readonly onStateChange: () => void
   private readonly codexManager: CodexAppServerManager
   private readonly hermesManager: HermesSshManager
   private readonly hermesSshSettings: HermesSshSettingsManager | null
-  private readonly generateTitle: (messageContent: string, cwd: string) => Promise<string | null>
+  private readonly generateTitle: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
+  private reportBackgroundError: ((message: string) => void) | null = null
   readonly activeTurns = new Map<string, ActiveTurn>()
 
   constructor(args: AgentCoordinatorArgs) {
     this.store = args.store
-    this.mediaStore = args.mediaStore ?? null
     this.onStateChange = args.onStateChange
     this.codexManager = args.codexManager ?? new CodexAppServerManager()
     this.hermesManager = args.hermesManager ?? new HermesSshManager()
     this.hermesSshSettings = args.hermesSshSettings ?? null
-    this.generateTitle = args.generateTitle ?? generateTitleForChat
+    this.generateTitle = args.generateTitle ?? generateTitleForChatDetailed
+  }
+
+  setBackgroundErrorReporter(report: ((message: string) => void) | null) {
+    this.reportBackgroundError = report
   }
 
   getActiveStatuses() {
@@ -393,9 +417,10 @@ export class AgentCoordinator {
   private getProviderSettings(provider: AgentProvider, command: Extract<ClientCommand, { type: "chat.send" }>) {
     const catalog = getServerProviderCatalog(provider)
     if (provider === "claude") {
-      const modelOptions = normalizeClaudeModelOptions(command.modelOptions, command.effort)
+      const model = normalizeServerModel(provider, command.model)
+      const modelOptions = normalizeClaudeModelOptions(model, command.modelOptions, command.effort)
       return {
-        model: normalizeServerModel(provider, command.model),
+        model: resolveClaudeApiModelId(model, modelOptions.contextWindow),
         effort: modelOptions.reasoningEffort,
         serviceTier: undefined,
         planMode: catalog.supportsPlanMode ? Boolean(command.planMode) : false,
@@ -425,7 +450,7 @@ export class AgentCoordinator {
     chatId: string
     provider: AgentProvider
     content: string
-    attachments: ImageAttachment[]
+    attachments: ChatAttachment[]
     model: string
     effort?: string
     serviceTier?: "fast"
@@ -443,15 +468,18 @@ export class AgentCoordinator {
     await this.store.setPlanMode(args.chatId, args.planMode)
 
     const existingMessages = this.store.getMessages(args.chatId)
-    const titleSeed = titleSeedFromPrompt(args.content, args.attachments)
-    const shouldGenerateTitle = args.appendUserPrompt && chat.title === "New Chat" && existingMessages.length === 0 && Boolean(titleSeed)
+    const shouldGenerateTitle = args.appendUserPrompt && chat.title === "New Chat" && existingMessages.length === 0
+    const optimisticTitle = shouldGenerateTitle ? fallbackTitleFromMessage(args.content) : null
+
+    if (optimisticTitle) {
+      await this.store.renameChat(args.chatId, optimisticTitle)
+    }
 
     if (args.appendUserPrompt) {
-      await this.store.appendMessage(args.chatId, timestamped({
-        kind: "user_prompt",
-        content: args.content,
-        attachments: args.attachments.length > 0 ? args.attachments : undefined,
-      }, Date.now()))
+      await this.store.appendMessage(
+        args.chatId,
+        timestamped({ kind: "user_prompt", content: args.content, attachments: args.attachments }, Date.now())
+      )
     }
     await this.store.recordTurnStarted(args.chatId)
 
@@ -461,7 +489,7 @@ export class AgentCoordinator {
     }
 
     if (shouldGenerateTitle) {
-      void this.generateTitleInBackground(args.chatId, titleSeed, project.localPath)
+      void this.generateTitleInBackground(args.chatId, args.content, project.localPath, optimisticTitle ?? "New Chat")
     }
 
     const onToolRequest = async (request: HarnessToolRequest): Promise<unknown> => {
@@ -485,7 +513,7 @@ export class AgentCoordinator {
     let turn: HarnessTurn
     if (args.provider === "claude") {
       turn = await startClaudeTurn({
-        content: args.content,
+        content: buildPromptText(args.content, args.attachments),
         localPath: project.localPath,
         model: args.model,
         effort: args.effort,
@@ -493,37 +521,38 @@ export class AgentCoordinator {
         sessionToken: chat.sessionToken,
         onToolRequest,
       })
-    } else if (args.provider === "codex") {
-      await this.codexManager.startSession({
-        chatId: args.chatId,
-        cwd: project.localPath,
-        model: args.model,
-        serviceTier: args.serviceTier,
-        sessionToken: chat.sessionToken,
-      })
-      turn = await this.codexManager.startTurn({
-        chatId: args.chatId,
-        content: args.content,
-        attachments: args.attachments,
-        model: args.model,
-        effort: args.effort as any,
-        serviceTier: args.serviceTier,
-        planMode: args.planMode,
-        onToolRequest,
-      })
     } else {
-      const settings = this.requireHermesSettings()
-      await this.hermesManager.startSession({
-        chatId: args.chatId,
-        settings,
-        sessionToken: chat.sessionToken,
-      })
-      turn = await this.hermesManager.startPrompt({
-        chatId: args.chatId,
-        content: args.content,
-        model: args.model,
-        onToolRequest,
-      })
+      if (args.provider === "codex") {
+        await this.codexManager.startSession({
+          chatId: args.chatId,
+          cwd: project.localPath,
+          model: args.model,
+          serviceTier: args.serviceTier,
+          sessionToken: chat.sessionToken,
+        })
+        turn = await this.codexManager.startTurn({
+          chatId: args.chatId,
+          content: buildPromptText(args.content, args.attachments),
+          model: args.model,
+          effort: args.effort as any,
+          serviceTier: args.serviceTier,
+          planMode: args.planMode,
+          onToolRequest,
+        })
+      } else {
+        const settings = this.requireHermesSettings()
+        await this.hermesManager.startSession({
+          chatId: args.chatId,
+          settings,
+          sessionToken: chat.sessionToken,
+        })
+        turn = await this.hermesManager.startPrompt({
+          chatId: args.chatId,
+          content: args.content,
+          model: args.model,
+          onToolRequest,
+        })
+      }
     }
 
     const active: ActiveTurn = {
@@ -570,20 +599,12 @@ export class AgentCoordinator {
 
     const chat = this.store.requireChat(chatId)
     const provider = this.resolveProvider(command, chat.provider)
-    const stagedIds = command.attachments?.map((attachment) => attachment.stagedId).filter(Boolean) ?? []
-    if (provider !== "codex" && stagedIds.length > 0) {
-      throw new Error("Image attachments are currently supported only for Codex chats.")
-    }
-
-    const attachments = stagedIds.length > 0
-      ? await this.requireMediaStore().finalizeStagedImages(chatId, stagedIds)
-      : []
     const settings = this.getProviderSettings(provider, command)
     await this.startTurnForChat({
       chatId,
       provider,
       content: command.content,
-      attachments,
+      attachments: command.attachments ?? [],
       model: settings.model,
       effort: settings.effort,
       serviceTier: settings.serviceTier,
@@ -594,18 +615,37 @@ export class AgentCoordinator {
     return { chatId }
   }
 
-  private async generateTitleInBackground(chatId: string, messageContent: string, cwd: string) {
+  private requireHermesSettings() {
+    if (!this.hermesSshSettings) {
+      throw new Error("Hermes SSH settings manager is not configured")
+    }
+    const settings = this.hermesSshSettings.getSettings()
+    if (!settings.host || !settings.user) {
+      throw new Error("Hermes SSH is not configured. Add a host in Settings > Providers.")
+    }
+    return settings
+  }
+
+  private async generateTitleInBackground(chatId: string, messageContent: string, cwd: string, expectedCurrentTitle: string) {
     try {
-      const title = await this.generateTitle(messageContent, cwd)
-      if (!title) return
+      const result = await this.generateTitle(messageContent, cwd)
+      if (result.failureMessage) {
+        this.reportBackgroundError?.(
+          `[title-generation] chat ${chatId} failed provider title generation: ${result.failureMessage}`
+        )
+      }
+      if (!result.title || result.usedFallback) return
 
       const chat = this.store.requireChat(chatId)
-      if (chat.title !== "New Chat") return
+      if (chat.title !== expectedCurrentTitle) return
 
-      await this.store.renameChat(chatId, title)
+      await this.store.renameChat(chatId, result.title)
       this.onStateChange()
-    } catch {
-      // Ignore background title generation failures.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.reportBackgroundError?.(
+        `[title-generation] chat ${chatId} failed background title generation: ${message}`
+      )
     }
   }
 
@@ -784,23 +824,5 @@ export class AgentCoordinator {
     pending.resolve(command.result)
 
     this.onStateChange()
-  }
-
-  private requireMediaStore() {
-    if (!this.mediaStore) {
-      throw new Error("Media storage is not configured")
-    }
-    return this.mediaStore
-  }
-
-  private requireHermesSettings() {
-    if (!this.hermesSshSettings) {
-      throw new Error("Hermes SSH settings manager is not configured")
-    }
-    const settings = this.hermesSshSettings.getSettings()
-    if (!settings.host || !settings.user) {
-      throw new Error("Hermes SSH is not configured. Add a host in Settings > Providers.")
-    }
-    return settings
   }
 }

@@ -12,6 +12,7 @@ import {
   resetSettingsPageChangelogCache,
   resolveSettingsSectionId,
   setCachedChangelog,
+  shouldPreviewChatSoundChange,
 } from "./SettingsPage"
 import { SettingsHeaderButton } from "../components/ui/settings-header-button"
 
@@ -206,6 +207,15 @@ describe("getGeneralHeaderAction", () => {
   })
 })
 
+describe("shouldPreviewChatSoundChange", () => {
+  test("previews only when the selected value actually changes", () => {
+    expect(shouldPreviewChatSoundChange("always", "always")).toBe(false)
+    expect(shouldPreviewChatSoundChange("always", "never")).toBe(true)
+    expect(shouldPreviewChatSoundChange("never", "unfocused")).toBe(true)
+    expect(shouldPreviewChatSoundChange("funk", "glass")).toBe(true)
+  })
+})
+
 describe("SettingsHeaderButton", () => {
   test("renders shared header button content and icon", () => {
     const html = renderToStaticMarkup(
@@ -222,11 +232,11 @@ describe("SettingsHeaderButton", () => {
   test("supports the default variant for the update action", () => {
     const html = renderToStaticMarkup(
       <SettingsHeaderButton variant="default" >
-        Update now
+        Update
       </SettingsHeaderButton>
     )
 
-    expect(html).toContain("Update now")
+    expect(html).toContain("Update")
     expect(html).toContain("bg-primary")
   })
 })

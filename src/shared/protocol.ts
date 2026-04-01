@@ -1,5 +1,6 @@
 import type {
   AgentProvider,
+  ChatAttachment,
   ChatSnapshot,
   HermesSshSettings,
   HermesSshValidationResult,
@@ -68,13 +69,14 @@ export type ClientCommand =
   | { type: "chat.create"; projectId: string }
   | { type: "chat.rename"; chatId: string; title: string }
   | { type: "chat.delete"; chatId: string }
+  | { type: "chat.markRead"; chatId: string }
   | {
       type: "chat.send"
       chatId?: string
       projectId?: string
       provider?: AgentProvider
       content: string
-      attachments?: Array<{ stagedId: string }>
+      attachments?: ChatAttachment[]
       model?: string
       modelOptions?: ModelOptions
       effort?: string

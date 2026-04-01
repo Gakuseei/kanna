@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Flower, Loader2, PanelLeft, X, Menu, Plus, Settings } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
+import { type KeybindingsSnapshot } from "../../shared/types"
 import { Button } from "../components/ui/button"
 import { cn } from "../lib/utils"
+import { getResolvedKeybindings } from "../lib/keybindings"
 import { ChatRow } from "../components/chat-ui/sidebar/ChatRow"
 import { LocalProjectsSection } from "../components/chat-ui/sidebar/LocalProjectsSection"
 import type { SidebarData, SidebarChatRow, UpdateSnapshot } from "../../shared/types"
@@ -24,8 +26,11 @@ interface KannaSidebarProps {
   onExpand: () => void
   onCreateChat: (projectId: string) => void
   onDeleteChat: (chat: SidebarChatRow) => void
+  onCopyPath: (localPath: string) => void
+  onOpenExternalPath: (action: "open_finder" | "open_editor", localPath: string) => void
   onRemoveProject: (projectId: string) => void
-  updatesEnabled: boolean
+  editorLabel: string
+  keybindings: KeybindingsSnapshot | null
   updateSnapshot: UpdateSnapshot | null
   onInstallUpdate: () => void
 }
@@ -44,8 +49,11 @@ export function KannaSidebar({
   onExpand,
   onCreateChat,
   onDeleteChat,
+  onCopyPath,
+  onOpenExternalPath,
   onRemoveProject,
-  updatesEnabled,
+  editorLabel,
+  keybindings,
   updateSnapshot,
   onInstallUpdate,
 }: KannaSidebarProps) {
@@ -75,6 +83,7 @@ export function KannaSidebar({
 
     return ordered
   }, [data.projectGroups, savedOrder])
+  const resolvedKeybindings = useMemo(() => getResolvedKeybindings(keybindings), [keybindings])
 
   const handleReorderGroups = useCallback(
     (newOrder: string[]) => setGroupOrder(newOrder),
@@ -118,10 +127,13 @@ export function KannaSidebar({
       chat={chat}
       activeChatId={activeChatId}
       nowMs={nowMs}
-      onSelectChat={(chatId) => navigate(`/chat/${chatId}`)}
+      onSelectChat={(chatId) => {
+        navigate(`/chat/${chatId}`)
+        onClose()
+      }}
       onDeleteChat={() => onDeleteChat(chat)}
     />
-  ), [activeChatId, navigate, nowMs, onDeleteChat])
+  ), [activeChatId, navigate, nowMs, onClose, onDeleteChat])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -160,7 +172,7 @@ export function KannaSidebar({
   const isConnecting = connectionStatus === "connecting" || !ready
   const statusLabel = isConnecting ? "Connecting" : connectionStatus === "connected" ? "Connected" : "Disconnected"
   const statusDotClass = connectionStatus === "connected" ? "bg-emerald-500" : "bg-amber-500"
-  const showUpdateButton = updatesEnabled && updateSnapshot?.updateAvailable === true
+  const showUpdateButton = updateSnapshot?.updateAvailable === true
   const showDevBadge = updateSnapshot
     ? updateSnapshot.latestVersion === `${updateSnapshot.currentVersion}-dev`
     : false
@@ -247,6 +259,7 @@ export function KannaSidebar({
                 navigate("/")
                 onClose()
               }}
+              className="size-10 rounded-lg"
               title="New project"
             >
               <Plus className="size-4" />
@@ -297,6 +310,9 @@ export function KannaSidebar({
 
             <LocalProjectsSection
               projectGroups={orderedProjectGroups}
+              editorLabel={editorLabel}
+              finderShortcut={resolvedKeybindings.bindings.openInFinder}
+              editorShortcut={resolvedKeybindings.bindings.openInEditor}
               onReorderGroups={handleReorderGroups}
               collapsedSections={collapsedSections}
               expandedGroups={expandedGroups}
@@ -310,6 +326,8 @@ export function KannaSidebar({
                   onCreateChat(projectId)
                 }
               }}
+              onCopyPath={onCopyPath}
+              onOpenExternalPath={onOpenExternalPath}
               onRemoveProject={onRemoveProject}
               isConnected={connectionStatus === "connected"}
             />

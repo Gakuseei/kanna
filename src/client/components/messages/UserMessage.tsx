@@ -1,81 +1,73 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import type { ChatAttachment } from "../../../shared/types"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import type { ImageAttachment } from "../../../shared/types"
-import { resolveServerUrl } from "../../lib/runtime"
-import { cn } from "../../lib/utils"
 import { createMarkdownComponents } from "./shared"
-import { ImageLightbox } from "./ImageLightbox"
+import { classifyAttachmentPreview } from "./attachmentPreview"
+import { AttachmentFileCard, AttachmentImageCard } from "./AttachmentCard"
+import { AttachmentPreviewModal } from "./AttachmentPreviewModal"
 
 interface Props {
   content: string
-  attachments?: ImageAttachment[]
-}
-
-function attachmentGridClass(count: number) {
-  if (count <= 1) {
-    return "grid-cols-1 max-w-[360px]"
-  }
-  return "grid-cols-2 max-w-[420px]"
+  attachments?: ChatAttachment[]
 }
 
 export function UserMessage({ content, attachments = [] }: Props) {
-  const [activeImageIndex, setActiveImageIndex] = useState<number | null>(null)
-  const hasContent = content.trim().length > 0
-  const hasAttachments = attachments.length > 0
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState<string | null>(null)
+  const imageAttachments = useMemo(
+    () => attachments.filter((attachment) => attachment.kind === "image" && attachment.contentUrl),
+    [attachments],
+  )
+  const fileAttachments = useMemo(
+    () => attachments.filter((attachment) => attachment.kind !== "image" || !attachment.contentUrl),
+    [attachments],
+  )
+  const selectedAttachment = attachments.find((attachment) => attachment.id === selectedAttachmentId) ?? null
 
-  if (!hasContent && !hasAttachments) {
-    return null
+  function handleAttachmentClick(attachment: ChatAttachment) {
+    const target = classifyAttachmentPreview(attachment)
+    if (target.openInNewTab) {
+      if (typeof window !== "undefined") {
+        window.open(new URL(attachment.contentUrl, window.location.origin).toString(), "_blank", "noopener,noreferrer")
+      }
+      return
+    }
+
+    setSelectedAttachmentId(attachment.id)
   }
 
   return (
     <>
-      <div className="flex justify-end">
-        <div className="flex max-w-[85%] sm:max-w-[80%] flex-col items-end gap-2">
-          {hasContent ? (
-            <div className="rounded-[20px] border border-border bg-muted px-3.5 py-1.5 text-primary prose prose-sm prose-invert [&_p]:whitespace-pre-line">
-              <Markdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents()}>
-                {content}
-              </Markdown>
-            </div>
-          ) : null}
-
-          {hasAttachments ? (
-            <div className={cn("grid gap-2", attachmentGridClass(attachments.length))}>
-              {attachments.map((attachment, index) => (
-                <button
-                  key={attachment.id}
-                  type="button"
-                  className="group overflow-hidden rounded-[22px] border border-border bg-muted text-left"
-                  onClick={() => setActiveImageIndex(index)}
-                >
-                  <img
-                    src={resolveServerUrl(attachment.url)}
-                    alt={attachment.fileName}
-                    loading="lazy"
-                    className={cn(
-                      "w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]",
-                      attachments.length === 1 ? "max-h-[320px]" : "h-40"
-                    )}
-                  />
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+      <div className="flex flex-col items-end gap-2">
+        {imageAttachments.length > 0 ? (
+          <div className="flex max-w-[85%] sm:max-w-[80%] flex-wrap justify-end gap-3">
+            {imageAttachments.map((attachment) => (
+              <AttachmentImageCard
+                key={attachment.id}
+                attachment={attachment}
+                onClick={() => handleAttachmentClick(attachment)}
+              />
+            ))}
+          </div>
+        ) : null}
+        {fileAttachments.length > 0 ? (
+          <div className="flex max-w-[85%] sm:max-w-[80%] flex-wrap justify-end gap-2">
+            {fileAttachments.map((attachment) => (
+              <AttachmentFileCard
+                key={attachment.id}
+                attachment={attachment}
+                onClick={() => handleAttachmentClick(attachment)}
+              />
+            ))}
+          </div>
+        ) : null}
+        {content ? (
+          <div className="max-w-[85%] sm:max-w-[80%] rounded-[20px] py-1.5 px-3.5 bg-muted text-primary border border-border prose prose-sm prose-invert [&_p]:whitespace-pre-line">
+            <Markdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents()}>{content}</Markdown>
+          </div>
+        ) : null}
       </div>
-
-      <ImageLightbox
-        attachments={attachments}
-        activeIndex={activeImageIndex ?? 0}
-        open={activeImageIndex !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setActiveImageIndex(null)
-          }
-        }}
-        onActiveIndexChange={setActiveImageIndex}
-      />
+      <AttachmentPreviewModal attachment={selectedAttachment} onOpenChange={(open) => !open && setSelectedAttachmentId(null)} />
     </>
   )
 }

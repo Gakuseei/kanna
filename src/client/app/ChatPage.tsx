@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
-import { ArrowDown, Flower } from "lucide-react"
+import { ArrowDown, Flower, Upload } from "lucide-react"
 import { useOutletContext } from "react-router-dom"
-import { ChatInput } from "../components/chat-ui/ChatInput"
+import type { HydratedTranscriptMessage } from "../../shared/types"
+import { ChatInput, type ChatInputHandle } from "../components/chat-ui/ChatInput"
 import { ChatNavbar } from "../components/chat-ui/ChatNavbar"
 import { RightSidebar } from "../components/chat-ui/RightSidebar"
 import { TerminalWorkspace } from "../components/chat-ui/TerminalWorkspace"
@@ -17,8 +18,10 @@ import {
   RIGHT_SIDEBAR_MIN_SIZE_PERCENT,
   useRightSidebarStore,
 } from "../stores/rightSidebarStore"
+import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import { DEFAULT_PROJECT_TERMINAL_LAYOUT, useTerminalLayoutStore } from "../stores/terminalLayoutStore"
 import { useTerminalPreferencesStore } from "../stores/terminalPreferencesStore"
+import { shouldCloseTerminalPane } from "./terminalLayoutResize"
 import { TERMINAL_TOGGLE_ANIMATION_DURATION_MS } from "./terminalToggleAnimation"
 import { useRightSidebarToggleAnimation } from "./useRightSidebarToggleAnimation"
 import { useTerminalToggleAnimation } from "./useTerminalToggleAnimation"
@@ -30,15 +33,78 @@ const EMPTY_STATE_TEXT = "What are we building?"
 const EMPTY_STATE_TYPING_INTERVAL_MS = 19
 const CHAT_NAVBAR_OFFSET_PX = 72
 const SCROLL_BUTTON_BOTTOM_PX = 120
+const TRANSCRIPT_TOC_BREAKPOINT_PX = 1200
+
+export interface TranscriptTocItem {
+  id: string
+  label: string
+  order: number
+}
+
+export function getTranscriptTocLabel(content: string) {
+  const firstLine = content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+
+  return firstLine ?? "(attachment only)"
+}
+
+export function createTranscriptTocItems(messages: HydratedTranscriptMessage[]): TranscriptTocItem[] {
+  let order = 0
+
+  return messages.flatMap((message) => {
+    if (message.kind !== "user_prompt" || message.hidden) {
+      return []
+    }
+
+    order += 1
+    return [{
+      id: message.id,
+      label: getTranscriptTocLabel(message.content),
+      order,
+    }]
+  })
+}
+
+export function shouldShowTranscriptTocPanel(args: {
+  enabled: boolean
+  layoutWidth: number
+  itemCount: number
+}) {
+  return args.enabled && args.layoutWidth > TRANSCRIPT_TOC_BREAKPOINT_PX && args.itemCount > 0
+}
+
+export function scrollTranscriptMessageIntoView(
+  container: Pick<HTMLElement, "getBoundingClientRect" | "scrollTop" | "scrollTo">,
+  target: Pick<HTMLElement, "getBoundingClientRect">
+) {
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const top = container.scrollTop + targetRect.top - containerRect.top - CHAT_NAVBAR_OFFSET_PX
+
+  container.scrollTo({
+    top: Math.max(0, top),
+    behavior: "smooth",
+  })
+}
+
+export function hasFileDragTypes(types: Iterable<string>) {
+  return Array.from(types).includes("Files")
+}
 
 export function ChatPage() {
   const state = useOutletContext<KannaState>()
   const layoutRootRef = useRef<HTMLDivElement>(null)
   const chatCardRef = useRef<HTMLDivElement>(null)
-  const chatInputRef = useRef<HTMLTextAreaElement>(null)
+  const chatInputElementRef = useRef<HTMLTextAreaElement>(null)
+  const chatInputRef = useRef<ChatInputHandle | null>(null)
   const [typedEmptyStateText, setTypedEmptyStateText] = useState("")
   const [isEmptyStateTypingComplete, setIsEmptyStateTypingComplete] = useState(false)
   const [fixedTerminalHeight, setFixedTerminalHeight] = useState(0)
+  const [isPageFileDragActive, setIsPageFileDragActive] = useState(false)
+  const [layoutWidth, setLayoutWidth] = useState(0)
+  const pageFileDragDepthRef = useRef(0)
   const projectId = state.runtime?.projectId ?? null
   const projectTerminalLayout = useTerminalLayoutStore((store) => (projectId ? store.projects[projectId] : undefined))
   const terminalLayout = projectTerminalLayout ?? DEFAULT_PROJECT_TERMINAL_LAYOUT
@@ -47,14 +113,22 @@ export function ChatPage() {
   const addTerminal = useTerminalLayoutStore((store) => store.addTerminal)
   const removeTerminal = useTerminalLayoutStore((store) => store.removeTerminal)
   const toggleVisibility = useTerminalLayoutStore((store) => store.toggleVisibility)
+  const resetMainSizes = useTerminalLayoutStore((store) => store.resetMainSizes)
   const setMainSizes = useTerminalLayoutStore((store) => store.setMainSizes)
   const setTerminalSizes = useTerminalLayoutStore((store) => store.setTerminalSizes)
   const toggleRightSidebar = useRightSidebarStore((store) => store.toggleVisibility)
   const setRightSidebarSize = useRightSidebarStore((store) => store.setSize)
   const scrollback = useTerminalPreferencesStore((store) => store.scrollbackLines)
   const minColumnWidth = useTerminalPreferencesStore((store) => store.minColumnWidth)
+  const showTranscriptToc = useChatPreferencesStore((store) => store.showTranscriptToc)
   const keybindings = state.keybindings
   const resolvedKeybindings = useMemo(() => getResolvedKeybindings(keybindings), [keybindings])
+  const transcriptTocItems = useMemo(() => createTranscriptTocItems(state.messages), [state.messages])
+  const shouldShowTranscriptToc = shouldShowTranscriptTocPanel({
+    enabled: showTranscriptToc,
+    layoutWidth,
+    itemCount: transcriptTocItems.length,
+  })
 
   const hasTerminals = terminalLayout.terminals.length > 0
   const showTerminalPane = Boolean(projectId && terminalLayout.isVisible && hasTerminals)
@@ -72,7 +146,7 @@ export function ChatPage() {
     shouldRenderTerminalLayout,
     projectId,
     terminalLayout,
-    chatInputRef,
+    chatInputRef: chatInputElementRef,
   })
   const {
     isAnimating: isRightSidebarAnimating,
@@ -88,10 +162,52 @@ export function ChatPage() {
 
   useStickyChatFocus({
     rootRef: chatCardRef,
-    fallbackRef: chatInputRef,
+    fallbackRef: chatInputElementRef,
     enabled: state.hasSelectedProject && state.runtime?.status !== "waiting_for_user",
     canCancel: state.canCancel,
   })
+
+  function hasDraggedFiles(event: React.DragEvent) {
+    return hasFileDragTypes(event.dataTransfer?.types ?? [])
+  }
+
+  function enqueueDroppedFiles(files: File[]) {
+    if (!state.hasSelectedProject || files.length === 0) {
+      return
+    }
+    chatInputRef.current?.enqueueFiles(files)
+  }
+
+  const handleToggleEmbeddedTerminal = () => {
+    if (!projectId) return
+    if (hasTerminals) {
+      toggleVisibility(projectId)
+      return
+    }
+
+    addTerminal(projectId)
+  }
+
+  const handleTerminalResize = (layout: Record<string, number>) => {
+    if (!projectId || !showTerminalPane || isTerminalAnimating.current) {
+      return
+    }
+
+    const chatSize = layout.chat
+    const terminalSize = layout.terminal
+    if (!Number.isFinite(chatSize) || !Number.isFinite(terminalSize)) {
+      return
+    }
+
+    const containerHeight = layoutRootRef.current?.getBoundingClientRect().height ?? 0
+    if (shouldCloseTerminalPane(containerHeight, terminalSize)) {
+      resetMainSizes(projectId)
+      toggleVisibility(projectId)
+      return
+    }
+
+    setMainSizes(projectId, [chatSize, terminalSize])
+  }
 
   useEffect(() => {
     if (state.messages.length !== 0) return
@@ -118,12 +234,7 @@ export function ChatPage() {
       if (!projectId) return
       if (actionMatchesEvent(resolvedKeybindings, "toggleEmbeddedTerminal", event)) {
         event.preventDefault()
-        if (hasTerminals) {
-          toggleVisibility(projectId)
-          return
-        }
-
-        addTerminal(projectId)
+        handleToggleEmbeddedTerminal()
         return
       }
 
@@ -153,19 +264,7 @@ export function ChatPage() {
 
     window.addEventListener("keydown", handleGlobalKeydown)
     return () => window.removeEventListener("keydown", handleGlobalKeydown)
-  }, [addTerminal, hasTerminals, projectId, resolvedKeybindings, toggleRightSidebar, toggleVisibility])
-
-  useEffect(() => {
-    if (state.messages.length === 0) return
-
-    const frameId = window.requestAnimationFrame(() => {
-      const element = state.scrollRef.current
-      if (!element) return
-      element.scrollTo({ top: element.scrollHeight, behavior: "auto" })
-    })
-
-    return () => window.cancelAnimationFrame(frameId)
-  }, [state.messages.length, state.scrollRef])
+  }, [addTerminal, handleToggleEmbeddedTerminal, projectId, resolvedKeybindings, toggleRightSidebar, toggleVisibility])
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
@@ -192,10 +291,17 @@ export function ChatPage() {
 
   useEffect(() => {
     const element = layoutRootRef.current
-    if (!element || !shouldRenderTerminalLayout) return
+    if (!element) return
 
     const updateHeight = () => {
       const containerHeight = element.getBoundingClientRect().height
+      const containerWidth = element.getBoundingClientRect().width
+      setLayoutWidth((current) => (Math.abs(current - containerWidth) < 1 ? current : containerWidth))
+
+      if (!shouldRenderTerminalLayout) {
+        return
+      }
+
       if (containerHeight <= 0) return
       const nextHeight = containerHeight * (terminalLayout.mainSizes[1] / 100)
       if (nextHeight <= 0) return
@@ -218,7 +324,39 @@ export function ChatPage() {
   }
 
   const chatCard = (
-    <Card ref={chatCardRef} className="bg-background h-full flex flex-col overflow-hidden border-0 rounded-none relative">
+    <Card
+      ref={chatCardRef}
+      className="bg-background h-full flex flex-col overflow-hidden border-0 rounded-none relative"
+      onDragEnter={(event) => {
+        if (!hasDraggedFiles(event) || !state.hasSelectedProject) return
+        event.preventDefault()
+        pageFileDragDepthRef.current += 1
+        setIsPageFileDragActive(true)
+      }}
+      onDragOver={(event) => {
+        if (!hasDraggedFiles(event) || !state.hasSelectedProject) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = "copy"
+        if (!isPageFileDragActive) {
+          setIsPageFileDragActive(true)
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!hasDraggedFiles(event) || !state.hasSelectedProject) return
+        event.preventDefault()
+        pageFileDragDepthRef.current = Math.max(0, pageFileDragDepthRef.current - 1)
+        if (pageFileDragDepthRef.current === 0) {
+          setIsPageFileDragActive(false)
+        }
+      }}
+      onDrop={(event) => {
+        if (!hasDraggedFiles(event) || !state.hasSelectedProject) return
+        event.preventDefault()
+        pageFileDragDepthRef.current = 0
+        setIsPageFileDragActive(false)
+        enqueueDroppedFiles([...event.dataTransfer.files])
+      }}
+    >
       <CardContent className="flex flex-1 min-h-0 flex-col p-0 overflow-hidden relative">
         <ChatNavbar
           sidebarCollapsed={state.sidebarCollapsed}
@@ -227,15 +365,7 @@ export function ChatPage() {
           onNewChat={state.handleCompose}
           localPath={state.navbarLocalPath}
           embeddedTerminalVisible={showTerminalPane}
-          onToggleEmbeddedTerminal={projectId
-            ? () => {
-              if (hasTerminals) {
-                toggleVisibility(projectId)
-                return
-              }
-              addTerminal(projectId)
-            }
-            : undefined}
+          onToggleEmbeddedTerminal={projectId ? handleToggleEmbeddedTerminal : undefined}
           rightSidebarVisible={showRightSidebar}
           onToggleRightSidebar={projectId ? () => toggleRightSidebar(projectId) : undefined}
           onOpenExternal={(action) => {
@@ -278,6 +408,43 @@ export function ChatPage() {
           ) : null}
         </ScrollArea>
 
+        {shouldShowTranscriptToc ? (
+          <div
+            className="absolute right-4 z-20"
+            style={{ top: CHAT_NAVBAR_OFFSET_PX }}
+          >
+            <div
+              className=" px-1 backdrop-blur-md"
+              data-testid="transcript-toc"
+            >
+ 
+              <div className="flex flex-col items-end gap-[1px]">
+                {transcriptTocItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="flex max-w-[175px] items-center justify-end gap-1 rounded-xl px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={() => {
+                      const container = state.scrollRef.current
+                      const target = document.getElementById(`msg-${item.id}`)
+                      if (!container || !target) {
+                        return
+                      }
+
+                      scrollTranscriptMessageIntoView(container, target)
+                    }}
+                    title={item.label}
+                  >
+                    {/* <span className="opacity-60 font-semibold translate-y-[0.5px]">{item.order}.</span> */}
+                    <span className="min-w-0 truncate">{item.label}</span>
+                    {/* <ArrowUpRight className="size-3"/> */}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {state.messages.length === 0 ? (
           <div
             key={state.activeChatId ?? "new-chat"}
@@ -315,6 +482,20 @@ export function ChatPage() {
           </div>
         ) : null}
 
+        {isPageFileDragActive ? (
+          <div className="absolute inset-0 z-30 pointer-events-none">
+            <div className="absolute inset-0 backdrop-blur-sm" />
+            <div className="absolute inset-6 ">
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center flex flex-col items-center justify-center gap-3">
+                  <Upload className="mx-auto size-14 text-foreground" strokeWidth={1.75} />
+                  <div className="text-xl font-medium text-foreground">Drop up to 10 files</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div
           style={{ bottom: SCROLL_BUTTON_BOTTOM_PX }}
           className={cn(
@@ -337,6 +518,7 @@ export function ChatPage() {
         <div className="bg-gradient-to-t from-background via-background pointer-events-auto" ref={state.inputRef}>
           <ChatInput
             ref={chatInputRef}
+            inputElementRef={chatInputElementRef}
             key={state.activeChatId ?? "new-chat"}
             onSubmit={state.handleSend}
             onCancel={() => {
@@ -346,6 +528,7 @@ export function ChatPage() {
             disabled={!state.hasSelectedProject || state.runtime?.status === "waiting_for_user"}
             canCancel={state.canCancel}
             chatId={state.activeChatId}
+            projectId={projectId}
             activeProvider={state.runtime?.provider ?? null}
             availableProviders={state.availableProviders}
           />
@@ -397,12 +580,7 @@ export function ChatPage() {
                 groupRef={mainPanelGroupRef}
                 orientation="vertical"
                 className="flex-1 min-h-0"
-                onLayoutChanged={(layout) => {
-                  if (!showTerminalPane || isTerminalAnimating.current) {
-                    return
-                  }
-                  setMainSizes(projectId, [layout.chat, layout.terminal])
-                }}
+                onLayoutChanged={handleTerminalResize}
               >
                 <ResizablePanel id="chat" defaultSize={`${terminalLayout.mainSizes[0]}%`} minSize="25%" className="min-h-0">
                   {chatCard}
@@ -410,6 +588,7 @@ export function ChatPage() {
                 <ResizableHandle
                   withHandle
                   orientation="vertical"
+                  disabled={!showTerminalPane}
                   className={cn(!showTerminalPane && "pointer-events-none opacity-0")}
                 />
                 <ResizablePanel
@@ -489,12 +668,7 @@ export function ChatPage() {
           groupRef={mainPanelGroupRef}
           orientation="vertical"
           className="flex-1 min-h-0"
-          onLayoutChanged={(layout) => {
-            if (!showTerminalPane || isTerminalAnimating.current) {
-              return
-            }
-            setMainSizes(projectId, [layout.chat, layout.terminal])
-          }}
+          onLayoutChanged={handleTerminalResize}
         >
           <ResizablePanel id="chat" defaultSize={`${terminalLayout.mainSizes[0]}%`} minSize="25%" className="min-h-0">
             {chatCard}
@@ -502,6 +676,7 @@ export function ChatPage() {
           <ResizableHandle
             withHandle
             orientation="vertical"
+            disabled={!showTerminalPane}
             className={cn(!showTerminalPane && "pointer-events-none opacity-0")}
           />
           <ResizablePanel

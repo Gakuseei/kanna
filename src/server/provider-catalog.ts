@@ -3,6 +3,7 @@ import type {
   ClaudeModelOptions,
   CodexModelOptions,
   HermesModelOptions,
+  ClaudeContextWindow,
   ModelOptions,
   ProviderCatalogEntry,
   ProviderModelOption,
@@ -13,6 +14,7 @@ import {
   DEFAULT_CODEX_MODEL_OPTIONS,
   DEFAULT_HERMES_MODEL_OPTIONS,
   PROVIDERS,
+  normalizeClaudeContextWindow,
   isClaudeReasoningEffort,
   isCodexReasoningEffort,
 } from "../shared/types"
@@ -49,7 +51,11 @@ export function normalizeServerModel(provider: AgentProvider, model?: string): s
   return catalog.defaultModel
 }
 
-export function normalizeClaudeModelOptions(modelOptions?: ModelOptions, legacyEffort?: string): ClaudeModelOptions {
+export function normalizeClaudeModelOptions(
+  model: string,
+  modelOptions?: ModelOptions,
+  legacyEffort?: string
+): ClaudeModelOptions {
   const reasoningEffort = modelOptions?.claude?.reasoningEffort
   return {
     reasoningEffort: isClaudeReasoningEffort(reasoningEffort)
@@ -57,6 +63,7 @@ export function normalizeClaudeModelOptions(modelOptions?: ModelOptions, legacyE
       : isClaudeReasoningEffort(legacyEffort)
         ? legacyEffort
         : DEFAULT_CLAUDE_MODEL_OPTIONS.reasoningEffort,
+    contextWindow: normalizeClaudeContextWindow(model, modelOptions?.claude?.contextWindow as ClaudeContextWindow | undefined),
   }
 }
 

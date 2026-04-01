@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
-import type { HermesSshSettings } from "../../shared/types"
-import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type KeybindingsSnapshot, type ModelOptions, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
-import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
+import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type HermesSshSettings, type KeybindingsSnapshot, type ModelOptions, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
+import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import { useRightSidebarStore } from "../stores/rightSidebarStore"
 import { useTerminalLayoutStore } from "../stores/terminalLayoutStore"
 import { getEditorPresetLabel, useTerminalPreferencesStore } from "../stores/terminalPreferencesStore"
@@ -11,7 +10,7 @@ import type { ChatSnapshot, LocalProjectsSnapshot, SidebarChatRow, SidebarData }
 import type { AskUserQuestionItem } from "../components/messages/types"
 import { useAppDialog } from "../components/ui/app-dialog"
 import { processTranscriptMessages } from "../lib/parseTranscript"
-import { isTauriDesktopWindow, getDesktopServerOrigin } from "../lib/runtime"
+import { getDesktopServerOrigin, isTauriDesktopWindow } from "../lib/runtime"
 import { canCancelStatus, getLatestToolIds, isProcessingStatus } from "./derived"
 import { KannaSocket, type SocketStatus } from "./socket"
 
@@ -20,6 +19,10 @@ export function getNewestRemainingChatId(projectGroups: SidebarData["projectGrou
   if (!projectGroup) return null
 
   return projectGroup.chats.find((chat) => chat.chatId !== activeChatId)?.chatId ?? null
+}
+
+export function shouldMarkActiveChatRead(doc: Pick<Document, "visibilityState" | "hasFocus"> = document) {
+  return doc.visibilityState === "visible" && doc.hasFocus()
 }
 
 function wsUrl() {
@@ -55,8 +58,50 @@ function logKannaState(message: string, details?: unknown) {
   console.info(`[useKannaState] ${message}`, details)
 }
 
-export function shouldPinTranscriptToBottom(distanceFromBottom: number) {
-  return distanceFromBottom < 120
+function composerStateFromSendOptions(options?: {
+  provider?: AgentProvider
+  model?: string
+  modelOptions?: ModelOptions
+  planMode?: boolean
+}): ComposerState | null {
+  if (options?.provider === "claude" && options.model && options.modelOptions?.claude) {
+    return {
+      provider: "claude",
+      model: options.model,
+      modelOptions: {
+        reasoningEffort: options.modelOptions.claude.reasoningEffort ?? "high",
+        contextWindow: options.modelOptions.claude.contextWindow ?? "200k",
+      },
+      planMode: Boolean(options.planMode),
+    }
+  }
+
+  if (options?.provider === "codex" && options.model && options.modelOptions?.codex) {
+    return {
+      provider: "codex",
+      model: options.model,
+      modelOptions: {
+        reasoningEffort: options.modelOptions.codex.reasoningEffort ?? "high",
+        fastMode: options.modelOptions.codex.fastMode ?? false,
+      },
+      planMode: Boolean(options.planMode),
+    }
+  }
+
+  if (options?.provider === "hermes" && options.model && options.modelOptions?.hermes) {
+    return {
+      provider: "hermes",
+      model: options.model,
+      modelOptions: { ...options.modelOptions.hermes },
+      planMode: false,
+    }
+  }
+
+  return null
+}
+
+export function shouldAutoFollowTranscript(distanceFromBottom: number) {
+  return distanceFromBottom < 24
 }
 
 export function getUiUpdateRestartReconnectAction(
@@ -176,6 +221,7 @@ export interface KannaState {
   handleCancel: () => Promise<void>
   handleDeleteChat: (chat: SidebarChatRow) => Promise<void>
   handleRemoveProject: (projectId: string) => Promise<void>
+  handleCopyPath: (localPath: string) => Promise<void>
   handleOpenExternal: (action: "open_finder" | "open_terminal" | "open_editor") => Promise<void>
   handleOpenExternalPath: (action: "open_finder" | "open_editor", localPath: string) => Promise<void>
   handleOpenLocalLink: (target: { path: string; line?: number; column?: number }) => Promise<void>
@@ -216,10 +262,13 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingLocalPath, setStartingLocalPath] = useState<string | null>(null)
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
+  const [focusEpoch, setFocusEpoch] = useState(0)
   const editorLabel = getEditorPresetLabel(useTerminalPreferencesStore((store) => store.editorPreset))
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLDivElement>(null)
+  const initialScrollCompletedRef = useRef(false)
+  const initialScrollFrameRef = useRef<number | null>(null)
 
   useEffect(() => socket.onStatus(setConnectionStatus), [socket])
 
@@ -247,12 +296,11 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [socket])
 
   useEffect(() => {
-    if (!updatesEnabled) return
     if (connectionStatus !== "connected") return
     void socket.command<UpdateSnapshot>({ type: "update.check", force: true }).catch((error) => {
       setCommandError(error instanceof Error ? error.message : String(error))
     })
-  }, [connectionStatus, socket, updatesEnabled])
+  }, [connectionStatus, socket])
 
   useEffect(() => {
     const phase = getUiUpdateRestartPhase()
@@ -269,7 +317,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [connectionStatus, navigate])
 
   useEffect(() => {
-    if (!updatesEnabled) return
     function handleWindowFocus() {
       if (!updateSnapshot?.lastCheckedAt) return
       if (Date.now() - updateSnapshot.lastCheckedAt <= 60 * 60 * 1000) return
@@ -282,7 +329,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     return () => {
       window.removeEventListener("focus", handleWindowFocus)
     }
-  }, [socket, updateSnapshot?.lastCheckedAt, updatesEnabled])
+  }, [socket, updateSnapshot?.lastCheckedAt])
 
   useEffect(() => {
     return socket.subscribe<KeybindingsSnapshot>({ type: "keybindings" }, (snapshot) => {
@@ -290,6 +337,20 @@ export function useKannaState(activeChatId: string | null): KannaState {
       setCommandError(null)
     })
   }, [socket])
+
+  useEffect(() => {
+    function handleFocusSignal() {
+      setFocusEpoch((value) => value + 1)
+    }
+
+    window.addEventListener("focus", handleFocusSignal)
+    document.addEventListener("visibilitychange", handleFocusSignal)
+
+    return () => {
+      window.removeEventListener("focus", handleFocusSignal)
+      document.removeEventListener("visibilitychange", handleFocusSignal)
+    }
+  }, [])
 
   useEffect(() => {
     if (!activeChatId) {
@@ -347,6 +408,35 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
   }, [chatSnapshot, pendingChatId])
 
+  useEffect(() => {
+    if (!activeChatId || !sidebarReady) return
+    if (!shouldMarkActiveChatRead()) return
+    const activeSidebarChat = sidebarData.projectGroups
+      .flatMap((group) => group.chats)
+      .find((chat) => chat.chatId === activeChatId)
+    if (!activeSidebarChat?.unread) return
+    void socket.command({ type: "chat.markRead", chatId: activeChatId }).catch((error) => {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    })
+  }, [activeChatId, focusEpoch, sidebarData.projectGroups, sidebarReady, socket])
+
+  useEffect(() => {
+    initialScrollCompletedRef.current = false
+    if (initialScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(initialScrollFrameRef.current)
+      initialScrollFrameRef.current = null
+    }
+    setIsAtBottom(true)
+  }, [activeChatId])
+
+  useEffect(() => {
+    return () => {
+      if (initialScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(initialScrollFrameRef.current)
+      }
+    }
+  }, [])
+
   useLayoutEffect(() => {
     const element = inputRef.current
     if (!element) return
@@ -393,35 +483,63 @@ export function useKannaState(activeChatId: string | null): KannaState {
     ?? fallbackLocalProjectPath
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (initialScrollCompletedRef.current) return
+
     const element = scrollRef.current
     if (!element) return
-    const distance = element.scrollHeight - element.scrollTop - element.clientHeight
-    if (shouldPinTranscriptToBottom(distance)) {
-      element.scrollTo({ top: element.scrollHeight, behavior: "smooth" })
+    if (activeChatId && !runtime) return
+
+    element.scrollTo({ top: element.scrollHeight, behavior: "auto" })
+    if (initialScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(initialScrollFrameRef.current)
     }
-  }, [activeChatId, inputHeight, messages.length, runtime?.status])
+    initialScrollFrameRef.current = window.requestAnimationFrame(() => {
+      const currentElement = scrollRef.current
+      if (!currentElement) return
+      currentElement.scrollTo({ top: currentElement.scrollHeight, behavior: "auto" })
+      initialScrollFrameRef.current = null
+    })
+    initialScrollCompletedRef.current = true
+  }, [activeChatId, inputHeight, messages.length, runtime])
+
+  useEffect(() => {
+    if (!initialScrollCompletedRef.current || !isAtBottom) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      const element = scrollRef.current
+      if (!element || !isAtBottom) return
+      element.scrollTo({ top: element.scrollHeight, behavior: "auto" })
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [activeChatId, inputHeight, isAtBottom, messages.length, runtime?.status])
 
   function updateScrollState() {
     const element = scrollRef.current
     if (!element) return
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight
-    setIsAtBottom(distance < 24)
+    setIsAtBottom(shouldAutoFollowTranscript(distance))
+  }
+
+  function enableAutoFollow(behavior: ScrollBehavior) {
+    const element = scrollRef.current
+    setIsAtBottom(true)
+    if (!element) return
+    element.scrollTo({ top: element.scrollHeight, behavior })
   }
 
   function scrollToBottom() {
-    const element = scrollRef.current
-    if (!element) return
-    element.scrollTo({ top: element.scrollHeight, behavior: "smooth" })
+    enableAutoFollow("smooth")
   }
 
-  async function createChatForProject(projectId: string, providerOverride?: "hermes") {
-    if (providerOverride === "hermes") {
-      useChatPreferencesStore.getState().resetComposerFromProvider("hermes")
-    } else {
-      useChatPreferencesStore.getState().initializeComposerForNewChat()
-    }
+  async function createChatForProject(projectId: string) {
+    const chatPreferences = useChatPreferencesStore.getState()
+    const sourceComposerState = activeChatId
+      ? chatPreferences.getComposerState(activeChatId)
+      : chatPreferences.getComposerState(NEW_CHAT_COMPOSER_ID)
     const result = await socket.command<{ chatId: string }>({ type: "chat.create", projectId })
+    chatPreferences.initializeComposerForChat(result.chatId, { sourceState: sourceComposerState })
     setSelectedProjectId(projectId)
     setPendingChatId(result.chatId)
     navigate(`/chat/${result.chatId}`)
@@ -429,11 +547,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     setCommandError(null)
   }
 
-  async function resolveProjectIdForStartChat(intent: StartChatIntent): Promise<{
-    projectId: string
-    localPath?: string
-    providerOverride?: "hermes"
-  }> {
+  async function resolveProjectIdForStartChat(intent: StartChatIntent): Promise<{ projectId: string; localPath?: string }> {
     if (intent.kind === "project_id") {
       return { projectId: intent.projectId }
     }
@@ -441,26 +555,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
     if (intent.kind === "local_path") {
       const result = await socket.command<{ projectId: string }>({ type: "project.open", localPath: intent.localPath })
       return { projectId: result.projectId, localPath: intent.localPath }
-    }
-
-    if (intent.project.mode === "ssh") {
-      if (!intent.project.hermesSshSettings) {
-        throw new Error("Hermes SSH settings are missing.")
-      }
-      await socket.command<HermesSshSettings>({
-        type: "settings.writeHermesSsh",
-        settings: intent.project.hermesSshSettings,
-      })
-      const result = await socket.command<{ projectId: string }>({
-        type: "project.create",
-        localPath: intent.project.localPath,
-        title: intent.project.title,
-      })
-      return {
-        projectId: result.projectId,
-        localPath: intent.project.localPath,
-        providerOverride: "hermes",
-      }
     }
 
     const result = await socket.command<{ projectId: string }>(
@@ -482,8 +576,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
         setStartingLocalPath(localPath)
       }
 
-      const { projectId, providerOverride } = await resolveProjectIdForStartChat(intent)
-      await createChatForProject(projectId, providerOverride)
+      const { projectId } = await resolveProjectIdForStartChat(intent)
+      await createChatForProject(projectId)
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -504,9 +598,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }
 
   async function handleCheckForUpdates(options?: { force?: boolean }) {
-    if (!updatesEnabled) {
-      return
-    }
     try {
       await socket.command<UpdateSnapshot>({ type: "update.check", force: options?.force })
       setCommandError(null)
@@ -516,9 +607,6 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }
 
   async function handleInstallUpdate() {
-    if (!updatesEnabled) {
-      return
-    }
     try {
       const result = await socket.command<UpdateInstallResult>({ type: "update.install" })
       if (!result.ok) {
@@ -549,13 +637,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
   async function handleSend(
     content: string,
-    options?: {
-      provider?: AgentProvider
-      model?: string
-      modelOptions?: ModelOptions
-      planMode?: boolean
-      attachments?: Array<{ stagedId: string }>
-    }
+    options?: { provider?: AgentProvider; model?: string; modelOptions?: ModelOptions; planMode?: boolean; attachments?: import("../../shared/types").ChatAttachment[] }
   ) {
     try {
       let projectId = selectedProjectId ?? sidebarData.projectGroups[0]?.groupKey ?? null
@@ -572,6 +654,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
         throw new Error("Open a project first")
       }
 
+      enableAutoFollow("auto")
+
       const result = await socket.command<{ chatId?: string }>({
         type: "chat.send",
         chatId: activeChatId ?? undefined,
@@ -585,6 +669,11 @@ export function useKannaState(activeChatId: string | null): KannaState {
       })
 
       if (!activeChatId && result.chatId) {
+        const chatPreferences = useChatPreferencesStore.getState()
+        chatPreferences.setComposerState(
+          result.chatId,
+          composerStateFromSendOptions(options) ?? chatPreferences.getComposerState(NEW_CHAT_COMPOSER_ID)
+        )
         setPendingChatId(result.chatId)
         navigate(`/chat/${result.chatId}`)
       }
@@ -656,6 +745,18 @@ export function useKannaState(activeChatId: string | null): KannaState {
         action,
         localPath,
       })
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  async function handleCopyPath(localPath: string) {
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("Clipboard is not available")
+      }
+      await navigator.clipboard.writeText(localPath)
+      setCommandError(null)
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     }
@@ -740,7 +841,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   async function handleExitPlanMode(toolUseId: string, confirmed: boolean, clearContext?: boolean, message?: string) {
     if (!activeChatId) return
     if (confirmed) {
-      useChatPreferencesStore.getState().setComposerPlanMode(false)
+      useChatPreferencesStore.getState().setChatComposerPlanMode(activeChatId, false)
     }
     try {
       await socket.command({
@@ -802,6 +903,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     handleCancel,
     handleDeleteChat,
     handleRemoveProject,
+    handleCopyPath,
     handleOpenExternal,
     handleOpenExternalPath,
     handleOpenLocalLink,

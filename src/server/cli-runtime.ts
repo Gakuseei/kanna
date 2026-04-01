@@ -5,10 +5,13 @@ import { APP_NAME, CLI_COMMAND, getDataDirDisplay, LOG_PREFIX, PACKAGE_NAME } fr
 import type { UpdateInstallErrorCode } from "../shared/types"
 import { PROD_SERVER_PORT } from "../shared/ports"
 import { CLI_SUPPRESS_OPEN_ONCE_ENV_VAR } from "./restart"
+import { logShareDetails, renderTerminalQr, startShareTunnel, type StartedShareTunnel } from "./share"
 
 export interface CliOptions {
   port: number
+  host: string
   openBrowser: boolean
+  share: boolean
   strictPort: boolean
 }
 
@@ -40,12 +43,17 @@ export type CliRunResult = StartedCli | RestartingCli | ExitedCli
 export interface CliRuntimeDeps {
   version: string
   bunVersion: string
-  startServer: (options: CliOptions & { update: CliUpdateOptions }) => Promise<{ port: number; stop: () => Promise<void> }>
+  startServer: (options: CliOptions & {
+    update: CliUpdateOptions
+    onMigrationProgress?: (message: string) => void
+  }) => Promise<{ port: number; stop: () => Promise<void> }>
   fetchLatestVersion: (packageName: string) => Promise<string>
   installVersion: (packageName: string, version: string) => UpdateInstallAttemptResult
   openUrl: (url: string) => void
   log: (message: string) => void
   warn: (message: string) => void
+  renderShareQr?: (url: string) => Promise<string>
+  startShareTunnel?: (localUrl: string) => Promise<StartedShareTunnel>
 }
 
 export interface UpdateInstallAttemptResult {
@@ -69,16 +77,23 @@ Usage:
   ${CLI_COMMAND} [options]
 
 Options:
-  --port <number>  Port to listen on (default: ${PROD_SERVER_PORT})
-  --strict-port    Fail instead of trying another port
-  --no-open        Don't open browser automatically
-  --version        Print version and exit
-  --help           Show this help message`)
+  --port <number>      Port to listen on (default: ${PROD_SERVER_PORT})
+  --host <host>        Bind to a specific host or IP
+  --remote             Shortcut for --host 0.0.0.0
+  --share              Create a public Cloudflare share URL with terminal QR
+  --strict-port        Fail instead of trying another port
+  --no-open            Don't open browser automatically
+  --version            Print version and exit
+  --help               Show this help message`)
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
   let port = PROD_SERVER_PORT
+  let host = "127.0.0.1"
   let openBrowser = true
+  let share = false
+  let sawHost = false
+  let sawRemote = false
   let strictPort = false
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -96,6 +111,27 @@ export function parseArgs(argv: string[]): ParsedArgs {
       index += 1
       continue
     }
+    if (arg === "--host") {
+      const next = argv[index + 1]
+      if (!next || next.startsWith("-")) throw new Error("Missing value for --host")
+      if (share) throw new Error("--share cannot be used with --host")
+      host = next
+      sawHost = true
+      index += 1
+      continue
+    }
+    if (arg === "--remote") {
+      if (share) throw new Error("--share cannot be used with --remote")
+      host = "0.0.0.0"
+      sawRemote = true
+      continue
+    }
+    if (arg === "--share") {
+      if (sawHost) throw new Error("--share cannot be used with --host")
+      if (sawRemote) throw new Error("--share cannot be used with --remote")
+      share = true
+      continue
+    }
     if (arg === "--no-open") {
       openBrowser = false
       continue
@@ -111,7 +147,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     kind: "run",
     options: {
       port,
+      host,
       openBrowser,
+      share,
       strictPort,
     },
   }
@@ -202,6 +240,7 @@ export async function runCli(argv: string[], deps: CliRuntimeDeps): Promise<CliR
 
   const { port, stop } = await deps.startServer({
     ...parsedArgs.options,
+    onMigrationProgress: deps.log,
     update: {
       version: deps.version,
       fetchLatestVersion: deps.fetchLatestVersion,
@@ -210,20 +249,42 @@ export async function runCli(argv: string[], deps: CliRuntimeDeps): Promise<CliR
       command: CLI_COMMAND,
     },
   })
-  const url = `http://localhost:${port}`
-  const launchUrl = url
+  const bindHost = parsedArgs.options.host
+  const displayHost = parsedArgs.options.share || bindHost === "127.0.0.1" || bindHost === "0.0.0.0" ? "localhost" : bindHost
+  const launchUrl = `http://${displayHost}:${port}`
+  let shareTunnelStop: (() => void) | null = null
 
-  deps.log(`${LOG_PREFIX} listening on ${url}`)
+  deps.log(`${LOG_PREFIX} listening on http://${bindHost}:${port}`)
   deps.log(`${LOG_PREFIX} data dir: ${getDataDirDisplay()}`)
 
   const suppressOpenBrowser = process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR] === "1"
-  if (parsedArgs.options.openBrowser && !suppressOpenBrowser) {
+  if (parsedArgs.options.share) {
+    try {
+      const shareTunnel = await (deps.startShareTunnel ?? ((localUrl) => startShareTunnel(localUrl, {
+        log: (message) => deps.log(`${LOG_PREFIX} ${message}`),
+      })))(launchUrl)
+      shareTunnelStop = shareTunnel.stop
+      await logShareDetails(deps.log, shareTunnel.publicUrl, launchUrl, deps.renderShareQr ?? renderTerminalQr)
+    } catch (error) {
+      await stop()
+      deps.warn(`${LOG_PREFIX} failed to start Cloudflare share tunnel`)
+      if (error instanceof Error && error.message) {
+        deps.warn(`${LOG_PREFIX} ${error.message}`)
+      }
+      return { kind: "exited", code: 1 }
+    }
+  }
+
+  if (parsedArgs.options.openBrowser && !parsedArgs.options.share && !suppressOpenBrowser) {
     deps.openUrl(launchUrl)
   }
 
   return {
     kind: "started",
-    stop,
+    stop: async () => {
+      shareTunnelStop?.()
+      await stop()
+    },
   }
 }
 

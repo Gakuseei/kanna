@@ -3,14 +3,39 @@ export const PROTOCOL_VERSION = 1 as const
 
 export type AgentProvider = "claude" | "codex" | "hermes"
 
+export type AttachmentKind = "image" | "file"
+
+export interface ChatAttachment {
+  id: string
+  kind: AttachmentKind
+  displayName: string
+  absolutePath: string
+  relativePath: string
+  contentUrl: string
+  mimeType: string
+  size: number
+}
+
+export interface InternalUserAttachmentsData {
+  userText: string
+  attachments: ChatAttachment[]
+  llmHintText: string
+}
+
 export interface ProviderModelOption {
   id: string
   label: string
   supportsEffort: boolean
+  contextWindowOptions?: readonly ProviderContextWindowOption[]
 }
 
 export interface ProviderEffortOption {
   id: string
+  label: string
+}
+
+export interface ProviderContextWindowOption {
+  id: ClaudeContextWindow
   label: string
 }
 
@@ -31,10 +56,12 @@ export const CODEX_REASONING_OPTIONS = [
 
 export type ClaudeReasoningEffort = (typeof CLAUDE_REASONING_OPTIONS)[number]["id"]
 export type CodexReasoningEffort = (typeof CODEX_REASONING_OPTIONS)[number]["id"]
+export type ClaudeContextWindow = "200k" | "1m"
 export type ServiceTier = "fast"
 
 export interface ClaudeModelOptions {
   reasoningEffort: ClaudeReasoningEffort
+  contextWindow: ClaudeContextWindow
 }
 
 export interface CodexModelOptions {
@@ -56,6 +83,7 @@ export type ModelOptions = Partial<{
 
 export const DEFAULT_CLAUDE_MODEL_OPTIONS = {
   reasoningEffort: "high",
+  contextWindow: "200k",
 } as const satisfies ClaudeModelOptions
 
 export const DEFAULT_CODEX_MODEL_OPTIONS = {
@@ -73,6 +101,15 @@ export function isCodexReasoningEffort(value: unknown): value is CodexReasoningE
   return CODEX_REASONING_OPTIONS.some((option) => option.id === value)
 }
 
+export const CLAUDE_CONTEXT_WINDOW_OPTIONS = [
+  { id: "200k", label: "200k" },
+  { id: "1m", label: "1M" },
+] as const satisfies readonly ProviderContextWindowOption[]
+
+export function isClaudeContextWindow(value: unknown): value is ClaudeContextWindow {
+  return CLAUDE_CONTEXT_WINDOW_OPTIONS.some((option) => option.id === value)
+}
+
 export interface ProviderCatalogEntry {
   id: AgentProvider
   label: string
@@ -87,12 +124,12 @@ export const PROVIDERS: ProviderCatalogEntry[] = [
   {
     id: "claude",
     label: "Claude",
-    defaultModel: "opus",
+    defaultModel: "sonnet",
     defaultEffort: "high",
     supportsPlanMode: true,
     models: [
-      { id: "opus", label: "Opus", supportsEffort: true },
-      { id: "sonnet", label: "Sonnet", supportsEffort: true },
+      { id: "opus", label: "Opus", supportsEffort: true, contextWindowOptions: [...CLAUDE_CONTEXT_WINDOW_OPTIONS] },
+      { id: "sonnet", label: "Sonnet", supportsEffort: true, contextWindowOptions: [...CLAUDE_CONTEXT_WINDOW_OPTIONS] },
       { id: "haiku", label: "Haiku", supportsEffort: true },
     ],
     efforts: [...CLAUDE_REASONING_OPTIONS],
@@ -136,6 +173,26 @@ export interface SkillCatalogEntry {
   source: "codex" | "agents"
 }
 
+export function getClaudeModelOption(modelId: string): ProviderModelOption | undefined {
+  return getProviderCatalog("claude").models.find((candidate) => candidate.id === modelId)
+}
+
+export function getClaudeContextWindowOptions(modelId: string): readonly ProviderContextWindowOption[] {
+  return getClaudeModelOption(modelId)?.contextWindowOptions ?? []
+}
+
+export function normalizeClaudeContextWindow(modelId: string, contextWindow?: unknown): ClaudeContextWindow {
+  const options = getClaudeContextWindowOptions(modelId)
+  if (options.length === 0) return DEFAULT_CLAUDE_MODEL_OPTIONS.contextWindow
+  return options.some((option) => option.id === contextWindow)
+    ? contextWindow as ClaudeContextWindow
+    : DEFAULT_CLAUDE_MODEL_OPTIONS.contextWindow
+}
+
+export function resolveClaudeApiModelId(modelId: string, contextWindow?: ClaudeContextWindow): string {
+  return contextWindow === "1m" ? `${modelId}[1m]` : modelId
+}
+
 export type KannaStatus =
   | "idle"
   | "starting"
@@ -157,6 +214,7 @@ export interface SidebarChatRow {
   chatId: string
   title: string
   status: KannaStatus
+  unread: boolean
   localPath: string
   provider: AgentProvider | null
   lastMessageAt?: number
@@ -397,7 +455,7 @@ export interface ToolResultEntry extends TranscriptEntryBase {
 export interface UserPromptEntry extends TranscriptEntryBase {
   kind: "user_prompt"
   content: string
-  attachments?: ImageAttachment[]
+  attachments?: ChatAttachment[]
 }
 
 export interface SystemInitEntry extends TranscriptEntryBase {
@@ -521,8 +579,20 @@ export type HydratedBashToolCall =
 export type HydratedWebSearchToolCall =
   HydratedToolCallBase<"web_search", WebSearchToolCall["input"], unknown>
 
+export interface ReadFileTextBlock {
+  type: "text"
+  text: string
+}
+
+export interface ReadFileImageBlock {
+  type: "image"
+  data: string
+  mimeType?: string
+}
+
 export interface ReadFileToolResult {
   content: string
+  blocks?: Array<ReadFileTextBlock | ReadFileImageBlock>
 }
 
 export type HydratedReadFileToolCall =
@@ -560,7 +630,7 @@ export type HydratedToolCall =
   | HydratedUnknownToolCall
 
 export type HydratedTranscriptMessage =
-  | ({ kind: "user_prompt"; content: string; attachments?: ImageAttachment[]; id: string; messageId?: string; timestamp: string; hidden?: boolean })
+  | ({ kind: "user_prompt"; content: string; attachments?: ChatAttachment[]; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "system_init"; model: string; tools: string[]; agents: string[]; slashCommands: string[]; mcpServers: McpServerInfo[]; provider: AgentProvider; id: string; messageId?: string; timestamp: string; hidden?: boolean; debugRaw?: string })
   | ({ kind: "account_info"; accountInfo: AccountInfo; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "assistant_text"; text: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })

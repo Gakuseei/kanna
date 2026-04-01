@@ -50,7 +50,7 @@ export function processTranscriptMessages(entries: TranscriptEntry[]): HydratedT
           ...createBaseMessage(entry),
           kind: "user_prompt",
           content: entry.content,
-          attachments: entry.attachments?.map((attachment) => ({ ...attachment })),
+          attachments: entry.attachments ?? [],
         })
         break
       case "system_init":
