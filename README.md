@@ -5,7 +5,7 @@
 <h1 align="center">Kanna</h1>
 
 <p align="center">
-  <strong>A beautiful web UI for the Claude Code & Codex CLIs</strong>
+  <strong>A desktop-first fork of Kanna for Claude Code, Codex, and Hermes</strong>
 </p>
 
 <p align="center">
@@ -26,6 +26,9 @@
 
 ## Quickstart
 
+This fork keeps the upstream web workflow, but also adds a Tauri desktop app and Hermes-over-SSH support.
+Right now the desktop workflow is tuned for my own local machine and development environment, so treat it as a personal fork rather than a polished cross-platform distribution.
+
 ```bash
 bun install -g kanna-code
 ```
@@ -43,10 +46,19 @@ kanna
 ```
 
 That's it. Kanna opens in your browser at [`localhost:3210`](http://localhost:3210).
+For the desktop app, see [Development](#development) and [Scripts](#scripts).
+
+## Fork Highlights
+
+- **Tauri desktop app** — run Kanna as a native desktop app in development or build distributable desktop bundles
+- **Hermes SSH provider** — connect to a remote Hermes session over SSH with saved connection settings
+- **Desktop-aware client behavior** — desktop runtime uses the local sidecar/backend instead of assuming a browser-only setup
+- **Upstream feature parity** — this fork tracks upstream Kanna while keeping the desktop and Hermes integrations intact
+- **Personal system setup** — the desktop integration is currently configured around my own machine, paths, and workflow rather than a fully generalized installer experience
 
 ## Features
 
-- **Multi-provider support** — switch between Claude and Codex (OpenAI) from the chat input, with per-provider model selection, reasoning effort controls, and Codex fast mode
+- **Multi-provider support** — switch between Claude, Codex (OpenAI), and Hermes from the chat input, with per-provider model selection and reasoning controls where supported
 - **Project-first sidebar** — chats grouped under projects, with live status indicators (idle, running, waiting, failed)
 - **Drag-and-drop project ordering** — reorder project groups in the sidebar with persistent ordering
 - **Local project discovery** — auto-discovers projects from both Claude and Codex local history
@@ -61,8 +73,8 @@ That's it. Kanna opens in your browser at [`localhost:3210`](http://localhost:32
 ## Architecture
 
 ```
-Browser (React + Zustand)
-    ↕  WebSocket
+Desktop App (Tauri + React + Zustand) / Browser (React + Zustand)
+    ↕  WebSocket / Tauri bridge
 Bun Server (HTTP + WS)
     ├── WSRouter ─── subscription & command routing
     ├── AgentCoordinator ─── multi-provider turn management
@@ -71,7 +83,7 @@ Bun Server (HTTP + WS)
     ├── EventStore ─── JSONL persistence + snapshot compaction
     └── ReadModels ─── derived views (sidebar, chat, projects)
     ↕  stdio
-Claude Agent SDK / Codex App Server (local processes)
+Claude Agent SDK / Codex App Server / Hermes SSH bridge (local or remote processes)
     ↕
 Local File System (~/.kanna/data/, project dirs)
 ```
@@ -83,6 +95,10 @@ Local File System (~/.kanna/data/, project dirs)
 - [Bun](https://bun.sh) v1.3.5+
 - A working [Claude Code](https://docs.anthropic.com/en/docs/claude-code) environment
 - *(Optional)* [Codex CLI](https://github.com/openai/codex) for Codex provider support
+- *(Optional)* Hermes reachable over SSH for Hermes provider support
+
+For desktop development/builds you also need the usual Tauri prerequisites, including Rust and the platform-native WebView dependencies.
+The desktop-specific setup in this fork is currently only maintained for my own system, so other environments may need additional cleanup or adaptation.
 
 Embedded terminal support uses Bun's native PTY APIs and currently works on macOS/Linux.
 
@@ -103,7 +119,7 @@ curl -fsSL https://bun.sh/install | bash
 Or clone and build from source:
 
 ```bash
-git clone https://github.com/jakemor/kanna.git
+git clone https://github.com/Gakuseei/kanna.git
 cd kanna
 bun install
 bun run build
@@ -177,19 +193,36 @@ Or run client and server separately:
 
 ```bash
 bun run dev:client   # http://localhost:5174
-bun run dev:server   # http://localhost:5175
+bun run dev:server   # http://localhost:3211
+```
+
+Run the desktop app in development:
+
+```bash
+bun run desktop:dev
+```
+
+Build the desktop app:
+
+```bash
+bun run desktop:build:prep
+bun run desktop:build
 ```
 
 ## Scripts
 
-| Command              | Description                  |
-| -------------------- | ---------------------------- |
-| `bun run build`      | Build for production         |
-| `bun run check`      | Typecheck + build            |
-| `bun run dev`        | Run client + server together |
-| `bun run dev:client` | Vite dev server only         |
-| `bun run dev:server` | Bun backend only             |
-| `bun run start`      | Start production server      |
+| Command                      | Description                                |
+| ---------------------------- | ------------------------------------------ |
+| `bun run build`              | Build the web client for production        |
+| `bun run check`              | Typecheck + build                          |
+| `bun run dev`                | Run client + server together               |
+| `bun run dev:client`         | Vite dev server only                       |
+| `bun run dev:server`         | Bun backend only on port `3211`            |
+| `bun run desktop:dev`        | Start the Tauri desktop app                |
+| `bun run desktop:dev:services` | Run the desktop app's local web services |
+| `bun run desktop:build:prep` | Build web assets and desktop sidecar prep  |
+| `bun run desktop:build`      | Build desktop bundles with Tauri           |
+| `bun run start`              | Start production server                    |
 
 ## Project Structure
 
@@ -237,11 +270,11 @@ Event logs are append-only JSONL. On startup, Kanna replays the log tail after t
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=jakemor%2Fkanna&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Gakuseei%2Fkanna&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=jakemor/kanna&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=jakemor/kanna&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=jakemor/kanna&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Gakuseei/kanna&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Gakuseei/kanna&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Gakuseei/kanna&type=date&legend=top-left" />
  </picture>
 </a>
 
